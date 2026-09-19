@@ -42,6 +42,7 @@ import {
   SettingsScreen,
   BenchmarkScreen,
   AboutScreen,
+  MemoryExplorerScreen,
 
   // Dev tools screen. Only available in debug mode.
   DevToolsScreen,
@@ -181,6 +182,22 @@ const App = observer(() => {
                             options={{
                               headerStyle: styles.headerWithoutDivider,
                               title: currentL10n.screenTitles.appInfo,
+                            }}
+                          />
+                          {/*
+                      Reachable only from the Memory settings section, not
+                      the drawer sidebar — same drawerItemStyle hiding
+                      technique the E2E benchmark runner route uses below.
+                    */}
+                          <Drawer.Screen
+                            name={ROUTES.MEMORY_EXPLORER}
+                            component={gestureHandlerRootHOC(
+                              MemoryExplorerScreen,
+                            )}
+                            options={{
+                              headerStyle: styles.headerWithoutDivider,
+                              title: currentL10n.screenTitles.memoryExplorer,
+                              drawerItemStyle: {display: 'none'},
                             }}
                           />
 

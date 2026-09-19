@@ -1,5 +1,7 @@
 import {Q} from '@nozbe/watermelondb';
 import type {Clause} from '@nozbe/watermelondb/QueryDescription';
+import type {Observable} from 'rxjs';
+import {map} from 'rxjs/operators';
 import {database} from '../database';
 import MemoryNode from '../database/models/MemoryNode';
 import MemoryEdge from '../database/models/MemoryEdge';
@@ -282,6 +284,39 @@ class MemoryGraphRepository {
     }
   }
 
+  /**
+   * Live variant of listNodes, for the Memory Explorer graph view — emits
+   * the current matching set immediately, then again on every write that
+   * changes it (create, update, status change), so the graph updates while
+   * the screen stays open without the screen having to poll. The first
+   * `.observe()`-based query in this codebase; every other store here
+   * re-`.fetch()`s manually after a write instead.
+   */
+  observeNodes(filter: MemoryNodeFilter = {}): Observable<MemoryNodeView[]> {
+    const clauses: Clause[] = [];
+    if (filter.kind) {
+      clauses.push(Q.where('kind', filter.kind));
+    }
+    if (filter.memoryType) {
+      clauses.push(Q.where('memory_type', filter.memoryType));
+    }
+    if (filter.compartmentId) {
+      clauses.push(Q.where('compartment_id', filter.compartmentId));
+    }
+    if (filter.status) {
+      clauses.push(Q.where('status', filter.status));
+    } else {
+      clauses.push(Q.where('status', 'active'));
+    }
+    if (filter.pinnedOnly) {
+      clauses.push(Q.where('pinned', true));
+    }
+    return this.nodes()
+      .query(...clauses)
+      .observe()
+      .pipe(map(records => records.map(record => record.toView())));
+  }
+
   async setNodePinned(id: string, pinned: boolean): Promise<void> {
     try {
       const record = await this.nodes().find(id);
@@ -554,6 +589,32 @@ class MemoryGraphRepository {
       console.error('MemoryGraphRepository: error fetching edge by id:', error);
       return null;
     }
+  }
+
+  /**
+   * Live variant of listEdges, scoped to the simple (status/relation)
+   * filters only — deliberately doesn't support the nodeId/direction
+   * lookup listEdges has, since the Memory Explorer graph view observes
+   * every active edge and intersects it client-side against whichever
+   * nodes it's currently rendering, rather than asking the DB layer to
+   * pre-filter to one node's neighborhood.
+   */
+  observeEdges(
+    filter: Pick<MemoryEdgeFilter, 'status' | 'relation'> = {},
+  ): Observable<MemoryEdgeView[]> {
+    const clauses: Clause[] = [];
+    if (filter.status) {
+      clauses.push(Q.where('status', filter.status));
+    } else {
+      clauses.push(Q.where('status', 'active'));
+    }
+    if (filter.relation) {
+      clauses.push(Q.where('relation', filter.relation));
+    }
+    return this.edges()
+      .query(...clauses)
+      .observe()
+      .pipe(map(records => records.map(record => record.toView())));
   }
 
   async listEdges(filter: MemoryEdgeFilter = {}): Promise<MemoryEdgeView[]> {

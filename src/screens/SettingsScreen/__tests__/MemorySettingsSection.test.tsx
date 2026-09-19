@@ -2,9 +2,20 @@ import React from 'react';
 import {Alert} from 'react-native';
 import {fireEvent, waitFor} from '@testing-library/react-native';
 
-import {render} from '../../../../jest/test-utils';
+import {render as baseRender} from '../../../../jest/test-utils';
 import {MemorySettingsSection} from '../MemorySettingsSection';
 import {memorySettingsStore} from '../../../store';
+
+// This section now navigates to the Memory Explorer screen, so every
+// render needs a NavigationContainer ancestor for useNavigation() to work.
+const render = (ui: React.ReactElement, options: any = {}) =>
+  baseRender(ui, {withNavigation: true, ...options});
+
+const mockNavigate = jest.fn();
+jest.mock('@react-navigation/native', () => ({
+  ...jest.requireActual('@react-navigation/native'),
+  useNavigation: () => ({navigate: mockNavigate}),
+}));
 
 const mockForceRunIdleSweep = jest.fn();
 jest.mock('../../../services/memory/MemorySweepScheduler', () => ({
@@ -270,6 +281,17 @@ describe('MemorySettingsSection', () => {
         expect(mockClearSweepLog).toHaveBeenCalledTimes(1);
       });
       alertSpy.mockRestore();
+    });
+  });
+
+  describe('Memory Explorer entry point', () => {
+    it('navigates to the Memory Explorer screen when opened', () => {
+      memorySettingsStore.enabled = true;
+      const {getByTestId} = render(<MemorySettingsSection />);
+
+      fireEvent.press(getByTestId('memory-explorer-open-button'));
+
+      expect(mockNavigate).toHaveBeenCalledWith('Memory Explorer');
     });
   });
 });

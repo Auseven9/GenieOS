@@ -605,6 +605,21 @@
       "interrupted": "Interrupted",
       "truncated": "Cut off — likely context full"
     },
+    "memoryExplorer": {
+      "settingsRowLabel": "Memory Explorer",
+      "settingsRowDescription": "A live visual map of the memory graph — color, size, and fade show valence, salience, and confidence.",
+      "settingsRowButton": "Open",
+      "legend": "Color: negative → positive · Size: salience · Fade: confidence · Gold ring: pinned · Blue ring: recently recalled",
+      "empty": "No memories to show yet.",
+      "detailKind": "Kind",
+      "detailConfidence": "Confidence",
+      "detailValence": "Valence",
+      "detailSalience": "Salience",
+      "detailProvenance": "Source",
+      "detailCompartment": "Compartment",
+      "detailPinned": "Pinned",
+      "detailUnscored": "not scored"
+    },
     "exportUtils": {
       "fileSaved": "File Saved",
       "fileSavedMessage": "The file has been saved to your Downloads folder as {{filename}}",
@@ -1224,7 +1239,8 @@
     "benchmark": "Benchmark",
     "settings": "Settings",
     "appInfo": "App Info",
-    "testCompletion": "Test Completion"
+    "testCompletion": "Test Completion",
+    "memoryExplorer": "Memory Explorer"
   },
   "chat": {
     "conversationReset": "Conversation reset!",

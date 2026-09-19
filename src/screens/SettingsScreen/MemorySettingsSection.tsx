@@ -6,6 +6,8 @@ import {Text, Card, Button, Switch, SegmentedButtons} from 'react-native-paper';
 import {pick, types} from '@react-native-documents/picker';
 import * as RNFS from '@dr.pogodin/react-native-fs';
 import Clipboard from '@react-native-clipboard/clipboard';
+import {useNavigation, ParamListBase} from '@react-navigation/native';
+import {DrawerNavigationProp} from '@react-navigation/drawer';
 
 import {Divider} from '../../components';
 import {L10nContext} from '../../utils';
@@ -13,6 +15,7 @@ import {t} from '../../locales';
 import {memorySettingsStore} from '../../store';
 import {useTheme} from '../../hooks';
 import {createStyles} from './styles';
+import {ROUTES} from '../../utils/navigationConstants';
 import {
   IDLE_SWEEP_INTERVAL_HOURS_OPTIONS,
   type IdleSweepIntervalHours,
@@ -64,10 +67,13 @@ function relativeTimeAgo(
   return units.justNow;
 }
 
+type SettingsNavigationProp = DrawerNavigationProp<ParamListBase>;
+
 export const MemorySettingsSection = observer(() => {
   const l10n = useContext(L10nContext);
   const theme = useTheme();
   const styles = createStyles(theme);
+  const navigation = useNavigation<SettingsNavigationProp>();
 
   const fileName = memorySettingsStore.embeddingModelPath?.split('/').pop();
 
@@ -389,6 +395,26 @@ export const MemorySettingsSection = observer(() => {
                     {l10n.settings.memoryDiagnosticsCopyButton}
                   </Button>
                 </View>
+              </View>
+
+              <Divider style={styles.divider} />
+
+              <View style={styles.switchContainer}>
+                <View style={styles.textContainer}>
+                  <Text variant="titleMedium" style={styles.textLabel}>
+                    {l10n.components.memoryExplorer.settingsRowLabel}
+                  </Text>
+                  <Text variant="labelSmall" style={styles.textDescription}>
+                    {l10n.components.memoryExplorer.settingsRowDescription}
+                  </Text>
+                </View>
+                <Button
+                  testID="memory-explorer-open-button"
+                  mode="outlined"
+                  onPress={() => navigation.navigate(ROUTES.MEMORY_EXPLORER)}
+                  style={styles.menuButton}>
+                  {l10n.components.memoryExplorer.settingsRowButton}
+                </Button>
               </View>
             </>
           )}

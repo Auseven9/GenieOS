@@ -4,9 +4,11 @@
 const mockNodeCreate = jest.fn();
 const mockNodeFetch = jest.fn();
 const mockNodeFind = jest.fn();
+const mockNodeObserve = jest.fn();
 const mockEdgeCreate = jest.fn();
 const mockEdgeFetch = jest.fn();
 const mockEdgeFind = jest.fn();
+const mockEdgeObserve = jest.fn();
 const mockCompartmentCreate = jest.fn();
 const mockCompartmentFetch = jest.fn();
 const mockWrite = jest.fn((callback: () => Promise<any>) => callback());
@@ -21,6 +23,7 @@ jest.mock('../../database', () => ({
             create: (mutator: (record: any) => void) => mockNodeCreate(mutator),
             query: (...clauses: any[]) => ({
               fetch: () => mockNodeFetch(...clauses),
+              observe: () => mockNodeObserve(...clauses),
             }),
             find: (id: string) => mockNodeFind(id),
           };
@@ -30,6 +33,7 @@ jest.mock('../../database', () => ({
             create: (mutator: (record: any) => void) => mockEdgeCreate(mutator),
             query: (...clauses: any[]) => ({
               fetch: () => mockEdgeFetch(...clauses),
+              observe: () => mockEdgeObserve(...clauses),
             }),
             find: (id: string) => mockEdgeFind(id),
           };
@@ -55,6 +59,7 @@ jest.mock('../../services/memory/EmbeddingEngine', () => ({
   default: {embed: (...args: any[]) => mockEmbed(...args)},
 }));
 
+import {of, Subject} from 'rxjs';
 import memoryGraphRepository, {
   EDGE_REINFORCEMENT_STEP,
 } from '../MemoryGraphRepository';
@@ -595,5 +600,72 @@ describe('MemoryGraphRepository.getOrCreateCompartment', () => {
 
     expect(result.name).toBe('family');
     expect(mockCompartmentCreate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('MemoryGraphRepository.observeNodes / observeEdges', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('observeNodes maps emitted records through toView() and defaults to active status', async () => {
+    const record = makeNodeRecord({id: 'node-9', label: 'dogs'});
+    mockNodeObserve.mockReturnValue(of([record]));
+
+    const emissions: any[] = [];
+    memoryGraphRepository.observeNodes().subscribe(views => {
+      emissions.push(views);
+    });
+
+    expect(emissions).toHaveLength(1);
+    expect(emissions[0]).toEqual([
+      expect.objectContaining({id: 'node-9', label: 'dogs'}),
+    ]);
+    // Exactly one clause (the defaulted active-status filter), same as
+    // listNodes when no explicit status is given.
+    expect(mockNodeObserve.mock.calls[0]).toHaveLength(1);
+  });
+
+  it('observeNodes re-emits on every value the underlying query pushes', async () => {
+    const subject = new Subject<any[]>();
+    mockNodeObserve.mockReturnValue(subject.asObservable());
+
+    const emissions: any[] = [];
+    memoryGraphRepository
+      .observeNodes()
+      .subscribe(views => emissions.push(views));
+
+    subject.next([makeNodeRecord({id: 'a'})]);
+    subject.next([makeNodeRecord({id: 'a'}), makeNodeRecord({id: 'b'})]);
+
+    expect(emissions).toHaveLength(2);
+    expect(emissions[1].map((v: any) => v.id)).toEqual(['a', 'b']);
+  });
+
+  it('observeEdges maps emitted records through toView() and defaults to active status', async () => {
+    const record = makeEdgeRecord({id: 'edge-9', relation: 'SUPPORTS'});
+    mockEdgeObserve.mockReturnValue(of([record]));
+
+    const emissions: any[] = [];
+    memoryGraphRepository.observeEdges().subscribe(views => {
+      emissions.push(views);
+    });
+
+    expect(emissions).toHaveLength(1);
+    expect(emissions[0]).toEqual([
+      expect.objectContaining({id: 'edge-9', relation: 'SUPPORTS'}),
+    ]);
+  });
+
+  it('observeEdges honors an explicit relation filter', async () => {
+    mockEdgeObserve.mockReturnValue(of([]));
+
+    memoryGraphRepository
+      .observeEdges({relation: 'CONTRADICTS'})
+      .subscribe(() => {});
+
+    // Two clauses: the defaulted active-status filter plus the relation
+    // filter — versus one clause (status only) with no relation given.
+    expect(mockEdgeObserve.mock.calls[0]).toHaveLength(2);
   });
 });
