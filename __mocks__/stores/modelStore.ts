@@ -92,6 +92,8 @@ class MockModelStore {
   exitBenchmarkMode: jest.Mock;
   recordReasoningObserved: jest.Mock;
   setReasoningOverride: jest.Mock;
+  runExclusiveContextOperation: jest.Mock;
+  whenReady: Promise<void> = Promise.resolve();
   benchmarkActive: boolean = false;
   isContextLoading: boolean = false;
   loadingModel: Model | undefined;
@@ -146,6 +148,8 @@ class MockModelStore {
       exitBenchmarkMode: false,
       recordReasoningObserved: false,
       setReasoningOverride: false,
+      runExclusiveContextOperation: false,
+      whenReady: false,
       contextId: computed,
       lastUsedModel: computed,
       activeModel: computed,
@@ -168,6 +172,9 @@ class MockModelStore {
     this.setNGPULayers = jest.fn();
     this.resetModels = jest.fn();
     this.initContext = jest.fn().mockResolvedValue(Promise.resolve());
+    this.runExclusiveContextOperation = jest.fn((fn: () => Promise<any>) =>
+      fn(),
+    );
     this.selectModel = jest.fn().mockResolvedValue(Promise.resolve());
     this.setRemoteModel = jest.fn().mockResolvedValue(Promise.resolve());
     this.checkSpaceAndDownload = jest.fn().mockResolvedValue(undefined);

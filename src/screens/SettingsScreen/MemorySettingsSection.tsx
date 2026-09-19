@@ -18,6 +18,7 @@ import {
 } from '../../repositories/MemorySettingsRepository';
 import {forceRunIdleSweep} from '../../services/memory/MemorySweepScheduler';
 import {getWorldviewSummary} from '../../services/memory/MemorySweepPipeline';
+import {ensureNotificationPermission} from '../../services/notifications/SweepNotificationService';
 
 // Separate from models/local (full chat models added via ModelsScreen) —
 // an embedding-only GGUF has no chat template/capabilities and does not
@@ -121,6 +122,22 @@ export const MemorySettingsSection = observer(() => {
     }
   };
 
+  const handleToggleSweepNotifications = async (value: boolean) => {
+    if (!value) {
+      memorySettingsStore.setSweepNotificationsEnabled(false);
+      return;
+    }
+    const granted = await ensureNotificationPermission();
+    if (!granted) {
+      Alert.alert(
+        l10n.notifications.permissionTitle,
+        l10n.notifications.permissionMessage,
+      );
+      return;
+    }
+    memorySettingsStore.setSweepNotificationsEnabled(true);
+  };
+
   const intervalLabels: Record<IdleSweepIntervalHours, string> = {
     6: l10n.settings.memoryIdleSweepInterval6h,
     24: l10n.settings.memoryIdleSweepInterval24h,
@@ -199,7 +216,9 @@ export const MemorySettingsSection = observer(() => {
                     {l10n.settings.memoryIdleSweepEnabledLabel}
                   </Text>
                   <Text variant="labelSmall" style={styles.textDescription}>
-                    {l10n.settings.memoryIdleSweepEnabledDescription}
+                    {Platform.OS === 'android'
+                      ? l10n.settings.memoryIdleSweepEnabledDescriptionAndroid
+                      : l10n.settings.memoryIdleSweepEnabledDescriptionIOS}
                   </Text>
                 </View>
                 <Switch
@@ -249,6 +268,22 @@ export const MemorySettingsSection = observer(() => {
                       style={styles.menuButton}>
                       {l10n.settings.memoryIdleSweepRunNowButton}
                     </Button>
+                  </View>
+
+                  <View style={styles.switchContainer}>
+                    <View style={styles.textContainer}>
+                      <Text variant="titleMedium" style={styles.textLabel}>
+                        {l10n.settings.memorySweepNotificationsLabel}
+                      </Text>
+                      <Text variant="labelSmall" style={styles.textDescription}>
+                        {l10n.settings.memorySweepNotificationsDescription}
+                      </Text>
+                    </View>
+                    <Switch
+                      testID="memory-sweep-notifications-switch"
+                      value={memorySettingsStore.sweepNotificationsEnabled}
+                      onValueChange={handleToggleSweepNotifications}
+                    />
                   </View>
                 </>
               )}

@@ -10,6 +10,7 @@ class MockMemorySettingsStore {
   idleSweepEnabled: boolean = false;
   idleSweepIntervalHours: number = 24;
   lastSweepAt: number | undefined = undefined;
+  sweepNotificationsEnabled: boolean = false;
   isLoaded: boolean = true;
 
   setEnabled: jest.Mock;
@@ -17,6 +18,7 @@ class MockMemorySettingsStore {
   setIdleSweepEnabled: jest.Mock;
   setIdleSweepIntervalHours: jest.Mock;
   reportSweepRan: jest.Mock;
+  setSweepNotificationsEnabled: jest.Mock;
 
   constructor() {
     makeAutoObservable(this, {
@@ -25,6 +27,7 @@ class MockMemorySettingsStore {
       setIdleSweepEnabled: false,
       setIdleSweepIntervalHours: false,
       reportSweepRan: false,
+      setSweepNotificationsEnabled: false,
     });
     this.setEnabled = jest.fn().mockImplementation(async (value: boolean) => {
       this.enabled = value;
@@ -47,6 +50,11 @@ class MockMemorySettingsStore {
     this.reportSweepRan = jest.fn().mockImplementation((epochMs: number) => {
       this.lastSweepAt = epochMs;
     });
+    this.setSweepNotificationsEnabled = jest
+      .fn()
+      .mockImplementation(async (value: boolean) => {
+        this.sweepNotificationsEnabled = value;
+      });
   }
 }
 

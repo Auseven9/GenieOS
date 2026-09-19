@@ -186,4 +186,25 @@ describe('MemorySettingsRepository', () => {
       expect(record.value).toBe('1700000000000');
     });
   });
+
+  describe('isSweepNotificationsEnabled / setSweepNotificationsEnabled', () => {
+    it('defaults to false when unset', async () => {
+      mockFetch.mockResolvedValue([]);
+      expect(await repo.isSweepNotificationsEnabled()).toBe(false);
+    });
+
+    it('reflects a stored true value', async () => {
+      mockFetch.mockResolvedValue([{value: 'true'}]);
+      expect(await repo.isSweepNotificationsEnabled()).toBe(true);
+    });
+
+    it('persists true/false correctly', async () => {
+      mockFetch.mockResolvedValue([]);
+      await repo.setSweepNotificationsEnabled(true);
+      const record: any = {};
+      mockCreate.mock.calls[0][0](record);
+      expect(record.key).toBe('memory.sweepNotificationsEnabled');
+      expect(record.value).toBe('true');
+    });
+  });
 });

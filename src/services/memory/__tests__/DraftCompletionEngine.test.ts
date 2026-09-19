@@ -1,7 +1,9 @@
 import {initLlama} from 'llama.rn';
 import {DraftCompletionEngine} from '../DraftCompletionEngine';
+import {modelStore} from '../../../store';
 
 const mockedInitLlama = initLlama as jest.Mock;
+const mockedRunExclusive = modelStore.runExclusiveContextOperation as jest.Mock;
 
 function makeMockContext(textToReturn = '[]') {
   return {
@@ -14,6 +16,18 @@ function makeMockContext(textToReturn = '[]') {
 describe('DraftCompletionEngine', () => {
   beforeEach(() => {
     mockedInitLlama.mockReset();
+    mockedRunExclusive.mockClear();
+  });
+
+  it('routes context load and release through modelStore.runExclusiveContextOperation', async () => {
+    const ctx = makeMockContext('hi');
+    mockedInitLlama.mockResolvedValue(ctx);
+
+    const engine = new DraftCompletionEngine();
+    await engine.complete('/models/draft.gguf', 'hi');
+    await engine.unload();
+
+    expect(mockedRunExclusive).toHaveBeenCalledTimes(2);
   });
 
   it('loads the model without embedding mode and returns completion text', async () => {

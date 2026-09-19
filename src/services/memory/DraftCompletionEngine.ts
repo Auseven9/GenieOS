@@ -1,4 +1,5 @@
 import {initLlama, LlamaContext, CompletionResponseFormat} from 'llama.rn';
+import {modelStore} from '../../store';
 
 /**
  * Standalone text completion via the small draft model (e.g. the 78M
@@ -10,6 +11,12 @@ import {initLlama, LlamaContext, CompletionResponseFormat} from 'llama.rn';
  * This is the "three model architecture": the draft model reasons about
  * what to remember on its own, rather than borrowing whichever chat model
  * (uncensored or instruct) happens to be loaded for the visible turn.
+ *
+ * Native context creation/release is still routed through ModelStore's
+ * runExclusiveContextOperation so this independent context can never load
+ * or unload at the exact same instant the foreground chat context does —
+ * relevant now that the idle sweep can run from Android's background
+ * headless task with no chat UI open at all.
  */
 
 // Small enough for a short extraction prompt + a short JSON reply; this
@@ -40,16 +47,20 @@ class DraftCompletionEngine {
     }
 
     if (!this.loadPromise) {
-      this.loadPromise = initLlama({
-        model: modelPath,
-        n_ctx: DRAFT_CONTEXT_SIZE,
-        n_batch: DRAFT_CONTEXT_SIZE,
-        n_ubatch: DRAFT_CONTEXT_SIZE,
-      }).then(ctx => {
-        this.context = ctx;
-        this.loadedModelPath = modelPath;
-        return ctx;
-      });
+      this.loadPromise = modelStore
+        .runExclusiveContextOperation(() =>
+          initLlama({
+            model: modelPath,
+            n_ctx: DRAFT_CONTEXT_SIZE,
+            n_batch: DRAFT_CONTEXT_SIZE,
+            n_ubatch: DRAFT_CONTEXT_SIZE,
+          }),
+        )
+        .then(ctx => {
+          this.context = ctx;
+          this.loadedModelPath = modelPath;
+          return ctx;
+        });
     }
 
     try {
@@ -94,9 +105,10 @@ class DraftCompletionEngine {
   /** Frees the draft context's RAM. Safe to call when nothing is loaded. */
   async unload(): Promise<void> {
     if (this.context) {
-      await this.context.release();
+      const ctx = this.context;
       this.context = undefined;
       this.loadedModelPath = undefined;
+      await modelStore.runExclusiveContextOperation(() => ctx.release());
     }
   }
 

@@ -14,6 +14,17 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
+    <!-- Runtime-prompted (API 33+) for the "notify on sweep complete"
+         setting; see SweepNotificationService. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- For the idle memory sweep's Android background path: a periodic
+         WorkManager job starts a foreground service to load a model and
+         run inference with the app fully closed. See
+         android/app/src/main/java/com/pocketpalai/memorysweep/. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
     <!-- Needed only for devices running Android 9 (API 28) or lower -->
     <!-- Currently used for storing chat sessions (/Download) -->
     <uses-permission
@@ -63,6 +74,17 @@
             <data android:scheme="pocketpal" android:host="checkout" />
         </intent-filter>
       </activity>
+
+        <!-- Runs the idle memory sweep's headless JS task as a foreground
+             service, started by MemorySweepWorker on WorkManager's
+             schedule. dataSync is the closest fit among Android's declared
+             foreground-service types for local, on-device reprocessing of
+             the user's own data; there is no type specific to on-device
+             AI inference. -->
+        <service
+            android:name=".memorysweep.MemorySweepHeadlessService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
 
         <!-- Optional native library for OpenCL (GPU acceleration) -->
         <uses-native-library

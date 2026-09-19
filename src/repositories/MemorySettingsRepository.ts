@@ -9,6 +9,7 @@ const KEY_MEMORY_ENABLED = 'memory.enabled';
 const KEY_IDLE_SWEEP_ENABLED = 'memory.idleSweepEnabled';
 const KEY_IDLE_SWEEP_INTERVAL_HOURS = 'memory.idleSweepIntervalHours';
 const KEY_LAST_SWEEP_AT = 'memory.lastSweepAt';
+const KEY_SWEEP_NOTIFICATIONS_ENABLED = 'memory.sweepNotificationsEnabled';
 
 // Presets rather than a free-typed number: there's no OS-level background
 // scheduler backing this (see MemorySweepScheduler), so the real interval a
@@ -156,6 +157,25 @@ class MemorySettingsRepository {
 
   async setLastSweepAt(epochMs: number): Promise<void> {
     await this.setRaw(KEY_LAST_SWEEP_AT, JSON.stringify(epochMs));
+  }
+
+  /** Off by default — notifications are opt-in on top of idle sweeps
+   * already being opt-in, and enabling this is gated on the OS actually
+   * granting notification permission (see SweepNotificationService). */
+  async isSweepNotificationsEnabled(): Promise<boolean> {
+    const raw = await this.getRaw(KEY_SWEEP_NOTIFICATIONS_ENABLED);
+    if (!raw) {
+      return false;
+    }
+    try {
+      return JSON.parse(raw) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  async setSweepNotificationsEnabled(enabled: boolean): Promise<void> {
+    await this.setRaw(KEY_SWEEP_NOTIFICATIONS_ENABLED, JSON.stringify(enabled));
   }
 }
 

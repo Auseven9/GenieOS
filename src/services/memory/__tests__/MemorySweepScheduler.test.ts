@@ -31,6 +31,7 @@ jest.mock('../../../store', () => ({
   chatSessionStore: {isGenerating: false},
   memorySettingsStore: {
     reportSweepRan: (...args: any[]) => mockReportSweepRan(...args),
+    sweepNotificationsEnabled: false,
   },
 }));
 
@@ -39,12 +40,26 @@ jest.mock('../MemorySweepPipeline', () => ({
   runMemorySweep: (...args: any[]) => mockRunMemorySweep(...args),
 }));
 
+const mockNotifySweepComplete = jest.fn();
+jest.mock('../../notifications/SweepNotificationService', () => ({
+  notifySweepComplete: (...args: any[]) => mockNotifySweepComplete(...args),
+}));
+
+const mockScheduleAndroidBackgroundSweep = jest.fn();
+const mockCancelAndroidBackgroundSweep = jest.fn();
+jest.mock('../AndroidBackgroundSweepScheduler', () => ({
+  scheduleAndroidBackgroundSweep: (...args: any[]) =>
+    mockScheduleAndroidBackgroundSweep(...args),
+  cancelAndroidBackgroundSweep: (...args: any[]) =>
+    mockCancelAndroidBackgroundSweep(...args),
+}));
+
 import {
   maybeRunIdleSweep,
   forceRunIdleSweep,
   initMemorySweepScheduler,
 } from '../MemorySweepScheduler';
-import {chatSessionStore} from '../../../store';
+import {chatSessionStore, memorySettingsStore} from '../../../store';
 
 describe('maybeRunIdleSweep', () => {
   beforeEach(() => {
@@ -56,6 +71,8 @@ describe('maybeRunIdleSweep', () => {
     mockGetLastSweepAt.mockResolvedValue(Date.now() - 25 * 60 * 60 * 1000);
     mockGetEmbeddingModelPath.mockResolvedValue('/models/bge-small.gguf');
     mockRunMemorySweep.mockResolvedValue(undefined);
+    (memorySettingsStore as any).sweepNotificationsEnabled = false;
+    mockNotifySweepComplete.mockResolvedValue(undefined);
   });
 
   it('does nothing when memory is disabled', async () => {
@@ -100,6 +117,25 @@ describe('maybeRunIdleSweep', () => {
     mockRunMemorySweep.mockRejectedValue(new Error('sweep exploded'));
     await expect(maybeRunIdleSweep()).resolves.toBeUndefined();
     expect(mockSetLastSweepAt).toHaveBeenCalled();
+  });
+
+  it('does not notify when sweep-notifications is off', async () => {
+    (memorySettingsStore as any).sweepNotificationsEnabled = false;
+    await maybeRunIdleSweep();
+    expect(mockNotifySweepComplete).not.toHaveBeenCalled();
+  });
+
+  it('notifies after a successful sweep when sweep-notifications is on', async () => {
+    (memorySettingsStore as any).sweepNotificationsEnabled = true;
+    await maybeRunIdleSweep();
+    expect(mockNotifySweepComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not notify when the sweep itself throws, even with notifications on', async () => {
+    (memorySettingsStore as any).sweepNotificationsEnabled = true;
+    mockRunMemorySweep.mockRejectedValue(new Error('sweep exploded'));
+    await maybeRunIdleSweep();
+    expect(mockNotifySweepComplete).not.toHaveBeenCalled();
   });
 
   it('swallows an error from a settings check rather than throwing', async () => {
@@ -187,5 +223,58 @@ describe('initMemorySweepScheduler', () => {
     await new Promise(resolve => setImmediate(resolve));
 
     expect(mockIsMemoryEnabled).not.toHaveBeenCalled();
+  });
+});
+
+describe('reconcileAndroidBackgroundSweep (via a fresh initMemorySweepScheduler cold start)', () => {
+  // A fresh module instance each time, so the module-level `initialized`
+  // guard doesn't swallow these calls the way it would across the shared
+  // describe block above.
+  beforeEach(() => {
+    jest.resetModules();
+    jest.clearAllMocks();
+    mockAddEventListener.mockReturnValue({remove: jest.fn()});
+    mockGetEmbeddingModelPath.mockResolvedValue(undefined);
+    mockGetLastSweepAt.mockResolvedValue(undefined);
+    mockRunMemorySweep.mockResolvedValue(undefined);
+  });
+
+  it('schedules the Android background sweep when memory and idle sweep are both enabled', async () => {
+    mockIsMemoryEnabled.mockResolvedValue(true);
+    mockIsIdleSweepEnabled.mockResolvedValue(true);
+    mockGetIdleSweepIntervalHours.mockResolvedValue(72);
+
+    const fresh = require('../MemorySweepScheduler');
+    fresh.initMemorySweepScheduler();
+    await new Promise(resolve => setImmediate(resolve));
+
+    expect(mockScheduleAndroidBackgroundSweep).toHaveBeenCalledWith(72);
+    expect(mockCancelAndroidBackgroundSweep).not.toHaveBeenCalled();
+  });
+
+  it('cancels the Android background sweep when idle sweep is disabled', async () => {
+    mockIsMemoryEnabled.mockResolvedValue(true);
+    mockIsIdleSweepEnabled.mockResolvedValue(false);
+    mockGetIdleSweepIntervalHours.mockResolvedValue(24);
+
+    const fresh = require('../MemorySweepScheduler');
+    fresh.initMemorySweepScheduler();
+    await new Promise(resolve => setImmediate(resolve));
+
+    expect(mockCancelAndroidBackgroundSweep).toHaveBeenCalled();
+    expect(mockScheduleAndroidBackgroundSweep).not.toHaveBeenCalled();
+  });
+
+  it('cancels the Android background sweep when memory itself is disabled', async () => {
+    mockIsMemoryEnabled.mockResolvedValue(false);
+    mockIsIdleSweepEnabled.mockResolvedValue(true);
+    mockGetIdleSweepIntervalHours.mockResolvedValue(24);
+
+    const fresh = require('../MemorySweepScheduler');
+    fresh.initMemorySweepScheduler();
+    await new Promise(resolve => setImmediate(resolve));
+
+    expect(mockCancelAndroidBackgroundSweep).toHaveBeenCalled();
+    expect(mockScheduleAndroidBackgroundSweep).not.toHaveBeenCalled();
   });
 });

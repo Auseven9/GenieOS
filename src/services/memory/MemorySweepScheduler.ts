@@ -2,6 +2,11 @@ import {AppState, type AppStateStatus} from 'react-native';
 import {chatSessionStore, memorySettingsStore} from '../../store';
 import memorySettingsRepository from '../../repositories/MemorySettingsRepository';
 import {runMemorySweep} from './MemorySweepPipeline';
+import {notifySweepComplete} from '../notifications/SweepNotificationService';
+import {
+  scheduleAndroidBackgroundSweep,
+  cancelAndroidBackgroundSweep,
+} from './AndroidBackgroundSweepScheduler';
 
 /**
  * Decides *when* an idle sweep should run. There is no OS-level background
@@ -46,6 +51,15 @@ async function runIfDue(options: {ignoreInterval: boolean}): Promise<void> {
     memorySettingsStore.reportSweepRan(startedAt);
 
     await runMemorySweep(embeddingModelPath);
+
+    // Shared by both trigger paths — the foreground AppState check (both
+    // platforms) and Android's background headless task — since both call
+    // runIfDue. notifee's local notifications work on iOS too, so this
+    // setting is available there even though the background-while-closed
+    // trigger itself is Android-only.
+    if (memorySettingsStore.sweepNotificationsEnabled) {
+      await notifySweepComplete();
+    }
   } catch (error) {
     console.error('MemorySweepScheduler: idle sweep check failed:', error);
   }
@@ -74,6 +88,36 @@ function handleAppStateChange(nextAppState: AppStateStatus) {
   appState = nextAppState;
 }
 
+/**
+ * Reconciles Android's periodic WorkManager job against currently
+ * persisted settings — reads the repository directly rather than the
+ * store, since the store's own hydration may not have finished yet this
+ * early in app startup. Runs on every cold start (idempotent either way:
+ * enqueueUniquePeriodicWork with UPDATE just re-applies the same interval
+ * when nothing changed) so an app update, a cleared WorkManager job
+ * database, or a setting enabled before this feature existed all
+ * self-heal without the user having to re-toggle anything.
+ */
+async function reconcileAndroidBackgroundSweep(): Promise<void> {
+  try {
+    const [memoryEnabled, idleSweepEnabled, intervalHours] = await Promise.all([
+      memorySettingsRepository.isMemoryEnabled(),
+      memorySettingsRepository.isIdleSweepEnabled(),
+      memorySettingsRepository.getIdleSweepIntervalHours(),
+    ]);
+    if (memoryEnabled && idleSweepEnabled) {
+      await scheduleAndroidBackgroundSweep(intervalHours);
+    } else {
+      await cancelAndroidBackgroundSweep();
+    }
+  } catch (error) {
+    console.error(
+      'MemorySweepScheduler: background sweep reconciliation failed:',
+      error,
+    );
+  }
+}
+
 let initialized = false;
 
 /**
@@ -87,6 +131,7 @@ export function initMemorySweepScheduler(): void {
   }
   initialized = true;
   AppState.addEventListener('change', handleAppStateChange);
+  reconcileAndroidBackgroundSweep().catch(() => {});
   // Cold start counts as "the user just arrived" too — otherwise a sweep
   // would never fire until the user backgrounds and reopens the app at
   // least once after enabling it.
