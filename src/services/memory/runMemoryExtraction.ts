@@ -1,11 +1,10 @@
-import {modelStore, chatSessionStore} from '../../store';
-import {resolveDraftModelId} from '../../store/draftResolution';
+import {chatSessionStore} from '../../store';
 import {chatSessionRepository} from '../../repositories/ChatSessionRepository';
 import memoryRepository from '../../repositories/MemoryRepository';
 import memoryGraphRepository from '../../repositories/MemoryGraphRepository';
 import memorySettingsRepository from '../../repositories/MemorySettingsRepository';
 import {convertToChatMessages} from '../../utils/chat';
-import draftCompletionEngine from './DraftCompletionEngine';
+import {createExtractionCompletionFn} from './extractionModel';
 import {
   extractMemoryGraph,
   type ConversationTurn,
@@ -16,6 +15,10 @@ import {
   type GraphNodeCandidate,
 } from './validateMemoryGraphInput';
 import {screenNode} from './MemoryWriteGatekeeper';
+import {
+  maybeConsolidateLabel,
+  type ConsolidationTarget,
+} from './MemoryConsolidationPipeline';
 import type {MemoryKind} from '../../types/memory';
 
 // Bounds the prompt size for the extraction pass itself — this is separate
@@ -103,101 +106,6 @@ function toMemoryKind(node: GraphNodeCandidate): MemoryKind {
 }
 
 /**
- * Resolves the configured draft model — the small model paired for
- * speculative decoding with the active chat model — for use as an
- * independent completion engine. Reuses resolveDraftModelId() (plain ID
- * lookup) rather than resolveDraftCandidate(), since the latter's
- * MTP-capability/embedding-width checks only guard speculative-decoding
- * pairing validity and don't apply to running the draft model standalone.
- *
- * Returns undefined (never throws) whenever no draft model is configured
- * or downloaded, so callers can fall back to the active chat model instead.
- */
-async function resolveDraftModel(): Promise<
-  {path: string; modelId: string} | undefined
-> {
-  const activeModel = modelStore.activeModel;
-  if (!activeModel) {
-    return undefined;
-  }
-  const draftId = resolveDraftModelId(
-    activeModel,
-    modelStore.contextInitParams.selectedDraftModelId,
-  );
-  if (!draftId) {
-    return undefined;
-  }
-  const draftModel = modelStore.models.find(m => m.id === draftId);
-  if (!draftModel || !draftModel.isDownloaded) {
-    return undefined;
-  }
-  try {
-    const path = await modelStore.getModelFullPath(draftModel);
-    return {path, modelId: draftModel.id};
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Builds the plain text-in/text-out completion function
- * GraphExtractionPipeline expects, plus a signature identifying which
- * model actually ran it — the audit trail for extracted_by on every node
- * and edge this pass produces.
- *
- * Schema-constrained via response_format.json_schema — llama.rn's own
- * completion() converts this into the native grammar/json_schema
- * constraint for local llama.cpp contexts, and the OpenAI-compatible
- * remote engine forwards it verbatim, so this one shape works for either
- * backend. extractMemoryGraph still defends against malformed output
- * regardless.
- *
- * Three-model architecture: prefers the small draft model, loaded as its
- * own independent context so it reasons about what to remember without
- * borrowing whichever chat model is currently active. Falls back to the
- * active chat model's engine only when no draft model is configured/
- * downloaded, so extraction still works before that pairing is set up.
- */
-async function createModelCompletionFn(): Promise<{
-  complete: (prompt: string) => Promise<string>;
-  extractedBy: string;
-}> {
-  const draftModel = await resolveDraftModel();
-  if (draftModel) {
-    return {
-      complete: prompt =>
-        draftCompletionEngine.complete(draftModel.path, prompt, {
-          jsonSchema: GRAPH_EXTRACTION_SCHEMA,
-          temperature: 0.2,
-          nPredict: 1500,
-        }),
-      extractedBy: draftModel.modelId,
-    };
-  }
-
-  const engine = modelStore.engine;
-  if (!engine) {
-    throw new Error('runMemoryExtraction: no active model engine');
-  }
-  return {
-    complete: async prompt => {
-      const result = await engine.completion({
-        messages: [{role: 'user', content: prompt}],
-        response_format: {
-          type: 'json_schema',
-          json_schema: {strict: true, schema: GRAPH_EXTRACTION_SCHEMA},
-        },
-        temperature: 0.2,
-        n_predict: 1500,
-        enable_thinking: false,
-      });
-      return result.text;
-    },
-    extractedBy: modelStore.activeModel?.id ?? 'unknown-active-model',
-  };
-}
-
-/**
  * Runs the post-turn extraction pass for a session and persists whatever
  * graph nodes/edges it finds — plus a flat `memories` row per node, so
  * existing digest retrieval keeps working unchanged. Fire-and-forget from
@@ -257,7 +165,10 @@ export async function maybeRunMemoryExtraction(
       return;
     }
 
-    const {complete, extractedBy} = await createModelCompletionFn();
+    const {complete, extractedBy} = await createExtractionCompletionFn(
+      GRAPH_EXTRACTION_SCHEMA,
+      {nPredict: 1500},
+    );
     const graph = await extractMemoryGraph(turns, complete);
     if (graph.nodes.length === 0) {
       return;
@@ -288,6 +199,11 @@ export async function maybeRunMemoryExtraction(
     // rejected (injection) or quarantined node is deliberately left out of
     // this map, so no edge can ever attach to it.
     const nodeIdByLabel = new Map<string, string>();
+    // Every (label, kind, compartment) an episodic node actually landed at
+    // this pass — checked for consolidation eligibility once all of this
+    // turn's nodes/edges are written, since that's when "does this group
+    // now have enough mentions" can change.
+    const touchedEpisodicTargets = new Map<string, ConsolidationTarget>();
     for (const node of graph.nodes) {
       const screened = screenNode(node);
       if (!screened) {
@@ -357,6 +273,17 @@ export async function maybeRunMemoryExtraction(
 
       if (!quarantined) {
         nodeIdByLabel.set(safeNode.label.toLowerCase(), createdNode.id);
+        if (safeNode.memoryType === 'episodic') {
+          const target: ConsolidationTarget = {
+            label: safeNode.label,
+            kind: safeNode.kind,
+            compartmentId,
+          };
+          touchedEpisodicTargets.set(
+            `${target.label.toLowerCase()}::${target.kind}::${target.compartmentId ?? ''}`,
+            target,
+          );
+        }
       }
     }
 
@@ -399,6 +326,13 @@ export async function maybeRunMemoryExtraction(
         // edge — one bad edge shouldn't abort the rest of this pass.
         console.warn('runMemoryExtraction: skipped an edge:', error);
       }
+    }
+
+    // Consolidation runs last and per touched group, after every node/edge
+    // this turn produced is already committed — each check queries the
+    // graph's current state, so order here doesn't matter beyond "after".
+    for (const target of touchedEpisodicTargets.values()) {
+      await maybeConsolidateLabel(target, embeddingModelPath);
     }
   } catch (error) {
     console.error('runMemoryExtraction: extraction pass failed:', error);

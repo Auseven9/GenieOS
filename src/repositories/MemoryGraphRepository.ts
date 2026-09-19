@@ -5,6 +5,7 @@ import MemoryNode from '../database/models/MemoryNode';
 import MemoryEdge from '../database/models/MemoryEdge';
 import MemoryCompartment from '../database/models/MemoryCompartment';
 import embeddingEngine from '../services/memory/EmbeddingEngine';
+import {computeRetention} from '../services/memory/decay';
 import {cosineSimilarity} from './MemoryRepository';
 import type {
   MemoryNode as MemoryNodeView,
@@ -109,6 +110,41 @@ class MemoryGraphRepository {
 
   /**
    * Finds an existing active *semantic* node with the same label
+   * (case-insensitive) and kind within the same compartment, or null.
+   * Shared by findOrCreateNode (return the match as-is) and
+   * upsertSemanticNode (update the match in place).
+   */
+  private async findMatchingSemanticNode(input: {
+    label: string;
+    kind: MemoryNodeInput['kind'];
+    compartmentId?: string;
+  }): Promise<MemoryNode | null> {
+    const clauses: Clause[] = [
+      // Dedup always matches against trusted, active nodes only — a
+      // fresh low-confidence mention of an already-established fact
+      // should resolve to the existing trusted node, not quarantine it.
+      Q.where('status', 'active'),
+      Q.where('kind', input.kind),
+      Q.where('memory_type', 'semantic'),
+    ];
+    if (input.compartmentId) {
+      clauses.push(Q.where('compartment_id', input.compartmentId));
+    } else {
+      clauses.push(Q.where('compartment_id', null));
+    }
+    const candidates = await this.nodes()
+      .query(...clauses)
+      .fetch();
+    const normalizedLabel = input.label.trim().toLowerCase();
+    return (
+      candidates.find(
+        node => node.label.trim().toLowerCase() === normalizedLabel,
+      ) ?? null
+    );
+  }
+
+  /**
+   * Finds an existing active *semantic* node with the same label
    * (case-insensitive) and kind within the same compartment, or creates a
    * new one. This is what keeps the graph a graph rather than a fresh,
    * disconnected node per extraction pass: "cats" mentioned across ten
@@ -132,26 +168,7 @@ class MemoryGraphRepository {
     }
 
     try {
-      const clauses: Clause[] = [
-        // Dedup always matches against trusted, active nodes only — a
-        // fresh low-confidence mention of an already-established fact
-        // should resolve to the existing trusted node, not quarantine it.
-        Q.where('status', 'active'),
-        Q.where('kind', input.kind),
-        Q.where('memory_type', 'semantic'),
-      ];
-      if (input.compartmentId) {
-        clauses.push(Q.where('compartment_id', input.compartmentId));
-      } else {
-        clauses.push(Q.where('compartment_id', null));
-      }
-      const candidates = await this.nodes()
-        .query(...clauses)
-        .fetch();
-      const normalizedLabel = input.label.trim().toLowerCase();
-      const existing = candidates.find(
-        node => node.label.trim().toLowerCase() === normalizedLabel,
-      );
+      const existing = await this.findMatchingSemanticNode(input);
       if (existing) {
         return existing.toView();
       }
@@ -165,6 +182,64 @@ class MemoryGraphRepository {
     return embeddingModelPath
       ? this.createNodeWithEmbedding(embeddingModelPath, input, initialStatus)
       : this.createNode(input, initialStatus);
+  }
+
+  /**
+   * Like findOrCreateNode, but for the one case where an existing match
+   * should be refreshed rather than left untouched: the consolidation
+   * pass re-synthesizing a semantic node's canonical summary as more
+   * episodic evidence accumulates. Updates description/confidence/
+   * valence/salience/embedding on the existing node in place — safe as a
+   * plain update (not a full supersede/audit-trail flow) because the
+   * evidence trail already lives in the PART_OF edges from every episodic
+   * node that fed into it, unlike a raw extracted claim with no such
+   * backing trail.
+   */
+  async upsertSemanticNode(
+    input: MemoryNodeInput,
+    embeddingModelPath?: string,
+  ): Promise<MemoryNodeView> {
+    if (input.memoryType !== 'semantic') {
+      throw new Error(
+        'MemoryGraphRepository: upsertSemanticNode requires memoryType "semantic"',
+      );
+    }
+    try {
+      const existing = await this.findMatchingSemanticNode(input);
+      if (existing) {
+        const embedding = embeddingModelPath
+          ? MemoryNode.encodeEmbedding(
+              await embeddingEngine.embed(
+                embeddingModelPath,
+                input.description
+                  ? `${input.label}: ${input.description}`
+                  : input.label,
+              ),
+            )
+          : existing.embedding;
+
+        await database.write(async () => {
+          await existing.update((r: MemoryNode) => {
+            r.description = input.description;
+            r.confidence = input.confidence ?? existing.confidence;
+            r.valence = input.valence;
+            r.salience = input.salience;
+            r.embedding = embedding;
+            r.extractedBy = input.extractedBy ?? existing.extractedBy;
+          });
+        });
+        return existing.toView();
+      }
+    } catch (error) {
+      console.error(
+        'MemoryGraphRepository: error upserting semantic node:',
+        error,
+      );
+    }
+
+    return embeddingModelPath
+      ? this.createNodeWithEmbedding(embeddingModelPath, input)
+      : this.createNode(input);
   }
 
   async getNodeById(id: string): Promise<MemoryNodeView | null> {
@@ -270,6 +345,7 @@ class MemoryGraphRepository {
         .query(Q.where('status', 'active'))
         .fetch();
 
+      const now = new Date();
       const scored = records
         .map(record => ({record, vector: record.embeddingVector}))
         .filter(
@@ -280,7 +356,15 @@ class MemoryGraphRepository {
           ...record.toView(),
           similarity: cosineSimilarity(queryVector, vector),
         }))
-        .sort((a, b) => b.similarity - a.similarity);
+        // Ranks by similarity scaled by Ebbinghaus retention (see decay.ts)
+        // rather than raw similarity alone, so a node that hasn't been
+        // recalled in a long time fades behind a fresher, equally relevant
+        // one instead of competing with it forever at full strength.
+        .sort(
+          (a, b) =>
+            b.similarity * computeRetention(b, now) -
+            a.similarity * computeRetention(a, now),
+        );
 
       return scored.slice(0, limit);
     } catch (error) {

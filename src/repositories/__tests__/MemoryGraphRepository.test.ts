@@ -199,6 +199,122 @@ describe('MemoryGraphRepository.findOrCreateNode', () => {
   });
 });
 
+describe('MemoryGraphRepository.searchNodesByEmbedding', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('ranks a fresher, well-reinforced node above a stale one that only wins on raw similarity', async () => {
+    const vector = new Float32Array([1, 0]);
+    const encoded = MemoryNode.encodeEmbedding(vector);
+    const now = new Date();
+    const stale = makeNodeRecord({
+      id: 'node-stale',
+      embedding: encoded,
+      createdAt: new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000),
+    });
+    const fresh = makeNodeRecord({
+      id: 'node-fresh',
+      embedding: encoded,
+      createdAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+    });
+    mockNodeFetch.mockResolvedValue([stale, fresh]);
+
+    const results = await memoryGraphRepository.searchNodesByEmbedding(
+      vector,
+      1,
+    );
+
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe('node-fresh');
+  });
+});
+
+describe('MemoryGraphRepository.upsertSemanticNode', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockWrite.mockImplementation((callback: () => Promise<any>) => callback());
+  });
+
+  it('throws for a non-semantic input rather than silently accepting it', async () => {
+    await expect(
+      memoryGraphRepository.upsertSemanticNode({
+        label: 'cats',
+        kind: 'topic',
+        memoryType: 'episodic',
+        provenance: 'model_inferred',
+      }),
+    ).rejects.toThrow(/memoryType "semantic"/);
+  });
+
+  it('creates a new node when no matching semantic node exists', async () => {
+    mockNodeFetch.mockResolvedValue([]);
+    mockNodeCreate.mockImplementation((mutator: (record: any) => void) => {
+      const record = makeNodeRecord({label: 'cats'});
+      mutator(record);
+      return record;
+    });
+
+    const result = await memoryGraphRepository.upsertSemanticNode({
+      label: 'cats',
+      kind: 'topic',
+      memoryType: 'semantic',
+      description: 'consolidated summary',
+      provenance: 'model_inferred',
+    });
+
+    expect(result.label).toBe('cats');
+    expect(mockNodeCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('updates an existing matching semantic node in place rather than leaving it untouched', async () => {
+    const existing = makeNodeRecord({
+      label: 'Cats',
+      description: 'old summary',
+      confidence: 0.5,
+    });
+    existing.update = async (mutator: (record: any) => void) =>
+      mutator(existing);
+    mockNodeFetch.mockResolvedValue([existing]);
+
+    const result = await memoryGraphRepository.upsertSemanticNode({
+      label: 'cats',
+      kind: 'topic',
+      memoryType: 'semantic',
+      description: 'fresh consolidated summary',
+      confidence: 0.9,
+      provenance: 'model_inferred',
+    });
+
+    expect(mockNodeCreate).not.toHaveBeenCalled();
+    expect(existing.description).toBe('fresh consolidated summary');
+    expect(existing.confidence).toBe(0.9);
+    expect(result.description).toBe('fresh consolidated summary');
+  });
+
+  it('re-embeds the updated node when an embedding model path is given', async () => {
+    const existing = makeNodeRecord({label: 'cats', embedding: 'old-embed'});
+    existing.update = async (mutator: (record: any) => void) =>
+      mutator(existing);
+    mockNodeFetch.mockResolvedValue([existing]);
+    const vector = new Float32Array([1, 2]);
+    mockEmbed.mockResolvedValue(vector);
+
+    await memoryGraphRepository.upsertSemanticNode(
+      {
+        label: 'cats',
+        kind: 'topic',
+        memoryType: 'semantic',
+        description: 'fresh summary',
+        provenance: 'model_inferred',
+      },
+      '/models/bge-small.gguf',
+    );
+
+    expect(existing.embedding).toBe(MemoryNode.encodeEmbedding(vector));
+  });
+});
+
 describe('MemoryGraphRepository.upsertEdge', () => {
   beforeEach(() => {
     jest.clearAllMocks();

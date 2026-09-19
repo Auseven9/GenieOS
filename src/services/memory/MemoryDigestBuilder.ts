@@ -1,4 +1,5 @@
 import memoryRepository from '../../repositories/MemoryRepository';
+import {computeRetention} from './decay';
 import type {Memory} from '../../types/memory';
 
 export interface MemoryDigestOptions {
@@ -25,6 +26,13 @@ export interface MemoryDigestOptions {
 
 const DEFAULT_MAX_MEMORIES = 8;
 const DEFAULT_MAX_CHARS = 2000;
+
+// searchByText's raw similarity ranking is fetched over a wider pool than
+// what's actually shown, so decay-based re-ranking (below) can promote a
+// fresher, well-reinforced memory over a stale one that only wins on raw
+// cosine similarity — narrowing to exactly maxMemories before re-ranking
+// would defeat the point of ranking by decay at all.
+const CANDIDATE_POOL_MULTIPLIER = 3;
 
 const DIGEST_HEADER =
   'Relevant memories about the user from past conversations. Memories ' +
@@ -73,11 +81,15 @@ export async function buildMemoryDigest(
   }
 
   let pinned: Memory[] = [];
-  let ranked: Memory[] = [];
+  let ranked: Array<Memory & {similarity: number}> = [];
   try {
     [pinned, ranked] = await Promise.all([
       memoryRepository.listMemories({pinnedOnly: true}),
-      memoryRepository.searchByText(embeddingModelPath, queryText, maxMemories),
+      memoryRepository.searchByText(
+        embeddingModelPath,
+        queryText,
+        maxMemories * CANDIDATE_POOL_MULTIPLIER,
+      ),
     ]);
   } catch (error) {
     console.error(
@@ -87,7 +99,21 @@ export async function buildMemoryDigest(
     return null;
   }
 
-  const combined = dedupeById([...pinned, ...ranked]).slice(0, maxMemories);
+  // Pinned memories are exempt from decay (see computeRetention) and
+  // always precede ranked ones; within the ranked pool, decay demotes a
+  // stale match below a fresher, equally-or-less-similar one rather than
+  // ranking on raw semantic similarity alone.
+  const now = new Date();
+  const rankedByRetention = [...ranked].sort(
+    (a, b) =>
+      b.similarity * computeRetention(b, now) -
+      a.similarity * computeRetention(a, now),
+  );
+
+  const combined = dedupeById([...pinned, ...rankedByRetention]).slice(
+    0,
+    maxMemories,
+  );
   if (combined.length === 0) {
     return null;
   }

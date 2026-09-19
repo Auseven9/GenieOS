@@ -75,10 +75,13 @@ describe('buildMemoryDigest', () => {
     });
 
     expect(result).toContain('likes dark mode');
+    // Fetches a wider candidate pool than maxMemories so decay-based
+    // re-ranking (see decay.ts) has room to promote a fresher match over
+    // one that only wins on raw similarity.
     expect(mockSearchByText).toHaveBeenCalledWith(
       '/models/bge-small.gguf',
       'what theme do I like?',
-      8,
+      24,
     );
   });
 
@@ -97,6 +100,44 @@ describe('buildMemoryDigest', () => {
     });
 
     expect(result?.match(/shared memory/g)).toHaveLength(1);
+  });
+
+  it('ranks a fresher, well-reinforced match above a stale one that only wins on raw similarity', async () => {
+    const now = new Date();
+    const recent = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    const stale = new Date(
+      now.getTime() - 365 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+
+    mockSearchByText.mockResolvedValue([
+      // Higher raw similarity, but a year old and never reinforced since.
+      {
+        ...makeMemory({
+          id: 'stale-high-similarity',
+          content: 'stale match',
+          createdAt: stale,
+        }),
+        similarity: 0.95,
+      },
+      // Lower raw similarity, but recently created.
+      {
+        ...makeMemory({
+          id: 'fresh-lower-similarity',
+          content: 'fresh match',
+          createdAt: recent,
+        }),
+        similarity: 0.7,
+      },
+    ]);
+
+    const result = await buildMemoryDigest({
+      embeddingModelPath: '/models/bge-small.gguf',
+      queryText: 'x',
+      maxMemories: 1,
+    });
+
+    expect(result).toContain('fresh match');
+    expect(result).not.toContain('stale match');
   });
 
   it('marks each line with its literal provenance so the tag survives into the prompt text', async () => {

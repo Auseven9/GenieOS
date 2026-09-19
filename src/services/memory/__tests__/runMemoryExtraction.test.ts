@@ -11,6 +11,7 @@ const mockGetOrCreateCompartment = jest.fn();
 const mockFindOrCreateNode = jest.fn();
 const mockUpsertEdge = jest.fn();
 const mockResolveContradiction = jest.fn();
+const mockMaybeConsolidateLabel = jest.fn();
 
 jest.mock('../../../repositories/MemorySettingsRepository', () => ({
   __esModule: true,
@@ -67,6 +68,10 @@ jest.mock('../DraftCompletionEngine', () => ({
   default: {complete: (...args: any[]) => mockDraftComplete(...args)},
 }));
 
+jest.mock('../MemoryConsolidationPipeline', () => ({
+  maybeConsolidateLabel: (...args: any[]) => mockMaybeConsolidateLabel(...args),
+}));
+
 import {maybeRunMemoryExtraction} from '../runMemoryExtraction';
 import {chatSessionStore, modelStore} from '../../../store';
 
@@ -101,6 +106,7 @@ describe('maybeRunMemoryExtraction', () => {
       winnerId: 'node-winner',
       loserId: 'node-loser',
     });
+    mockMaybeConsolidateLabel.mockResolvedValue(undefined);
   });
 
   it('does nothing when memory is disabled', async () => {
@@ -350,6 +356,79 @@ describe('maybeRunMemoryExtraction', () => {
       undefined,
       'quarantined',
     );
+  });
+
+  it('checks consolidation eligibility for an episodic node landed this pass', async () => {
+    mockGetSessionById.mockResolvedValue({messages: [makeSessionMessage()]});
+    mockConvertToChatMessages.mockReturnValue([
+      {role: 'user', content: 'asked about cats again'},
+    ]);
+    mockCompletion.mockResolvedValue({
+      text: graphResponse({
+        nodes: [
+          {
+            label: 'cats',
+            content: 'asked about cats',
+            kind: 'topic',
+            memory_type: 'episodic',
+            confidence: 0.9,
+          },
+        ],
+      }),
+    });
+
+    await maybeRunMemoryExtraction('session-1');
+
+    expect(mockMaybeConsolidateLabel).toHaveBeenCalledWith(
+      {label: 'cats', kind: 'topic', compartmentId: undefined},
+      undefined,
+    );
+  });
+
+  it('does not check consolidation for a semantic-only pass', async () => {
+    mockGetSessionById.mockResolvedValue({messages: [makeSessionMessage()]});
+    mockConvertToChatMessages.mockReturnValue([
+      {role: 'user', content: 'I prefer dark mode'},
+    ]);
+    mockCompletion.mockResolvedValue({
+      text: graphResponse({
+        nodes: [
+          {
+            label: 'dark mode',
+            content: 'prefers dark mode',
+            memory_type: 'semantic',
+            confidence: 0.9,
+          },
+        ],
+      }),
+    });
+
+    await maybeRunMemoryExtraction('session-1');
+
+    expect(mockMaybeConsolidateLabel).not.toHaveBeenCalled();
+  });
+
+  it('does not check consolidation for a quarantined episodic node', async () => {
+    mockGetSessionById.mockResolvedValue({messages: [makeSessionMessage()]});
+    mockConvertToChatMessages.mockReturnValue([
+      {role: 'user', content: 'hello'},
+    ]);
+    mockCompletion.mockResolvedValue({
+      text: graphResponse({
+        nodes: [
+          {
+            label: 'guess',
+            content: 'a wild guess',
+            memory_type: 'episodic',
+            confidence: 0.1,
+          },
+        ],
+      }),
+    });
+
+    await maybeRunMemoryExtraction('session-1');
+
+    expect(mockMaybeConsolidateLabel).not.toHaveBeenCalled();
   });
 
   it('does not persist anything when extraction finds no nodes', async () => {
