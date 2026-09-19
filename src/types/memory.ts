@@ -23,7 +23,14 @@ export type MemoryProvenance =
   | 'model_inferred'
   | 'external_content';
 
-export type MemoryStatus = 'active' | 'retired';
+/**
+ * 'quarantined' is a third, distinct resting state from 'retired': a
+ * quarantined row was never trusted (write-path screening held it back —
+ * low confidence, or a redacted secret) rather than once-active and later
+ * superseded. Both are excluded from default active-only queries, but the
+ * distinction matters for audit/review UI.
+ */
+export type MemoryStatus = 'active' | 'retired' | 'quarantined';
 
 export interface Memory {
   id: string;

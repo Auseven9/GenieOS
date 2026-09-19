@@ -23,6 +23,8 @@ export default class MemoryNode extends Model {
   @field('compartment_id') compartmentId?: string;
   @field('provenance') provenance!: MemoryProvenance;
   @field('source_memory_id') sourceMemoryId?: string;
+  @field('source_conversation_id') sourceConversationId?: string;
+  @field('extracted_by') extractedBy?: string;
   @field('pinned') pinned!: boolean;
   @field('status') status!: MemoryStatus;
   @field('last_accessed_at') lastAccessedAt?: number;
@@ -62,6 +64,8 @@ export default class MemoryNode extends Model {
       compartmentId: this.compartmentId,
       provenance: this.provenance,
       sourceMemoryId: this.sourceMemoryId,
+      sourceConversationId: this.sourceConversationId,
+      extractedBy: this.extractedBy,
       pinned: this.pinned,
       status: this.status,
       lastAccessedAt: this.lastAccessedAt

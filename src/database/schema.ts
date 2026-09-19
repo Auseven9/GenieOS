@@ -1,7 +1,7 @@
 import {appSchema, tableSchema} from '@nozbe/watermelondb';
 
 export default appSchema({
-  version: 11,
+  version: 12,
   tables: [
     tableSchema({
       name: 'chat_sessions',
@@ -192,8 +192,12 @@ export default appSchema({
         },
         {name: 'provenance', type: 'string', isIndexed: true},
         {name: 'source_memory_id', type: 'string', isOptional: true},
+        {name: 'source_conversation_id', type: 'string', isOptional: true},
+        // Model signature that performed the extraction, e.g. the draft
+        // model's id — the audit trail for "where did this come from".
+        {name: 'extracted_by', type: 'string', isOptional: true},
         {name: 'pinned', type: 'boolean'},
-        {name: 'status', type: 'string', isIndexed: true}, // 'active' | 'retired'
+        {name: 'status', type: 'string', isIndexed: true}, // 'active' | 'retired' | 'quarantined'
         {name: 'last_accessed_at', type: 'number', isOptional: true},
         {name: 'access_count', type: 'number'},
         {name: 'created_at', type: 'number'},
@@ -209,6 +213,9 @@ export default appSchema({
         {name: 'weight', type: 'number'},
         {name: 'confidence', type: 'number'},
         {name: 'provenance', type: 'string', isIndexed: true},
+        {name: 'extracted_by', type: 'string', isOptional: true},
+        {name: 'last_accessed_at', type: 'number', isOptional: true},
+        {name: 'access_count', type: 'number'},
         {
           name: 'source_conversation_id',
           type: 'string',

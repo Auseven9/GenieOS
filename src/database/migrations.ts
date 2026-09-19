@@ -262,5 +262,28 @@ export default schemaMigrations({
         }),
       ],
     },
+    // Migration to version 12: provenance/audit fields (extracted_by,
+    // source_conversation_id on nodes; extracted_by + access tracking on
+    // edges) for the write-path security/audit layer.
+    {
+      toVersion: 12,
+      steps: [
+        addColumns({
+          table: 'memory_nodes',
+          columns: [
+            {name: 'source_conversation_id', type: 'string', isOptional: true},
+            {name: 'extracted_by', type: 'string', isOptional: true},
+          ],
+        }),
+        addColumns({
+          table: 'memory_edges',
+          columns: [
+            {name: 'extracted_by', type: 'string', isOptional: true},
+            {name: 'last_accessed_at', type: 'number', isOptional: true},
+            {name: 'access_count', type: 'number'},
+          ],
+        }),
+      ],
+    },
   ],
 });

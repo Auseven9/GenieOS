@@ -13,9 +13,11 @@ import type {
   MemoryEdge as MemoryEdgeView,
   MemoryEdgeInput,
   MemoryEdgeFilter,
+  MemoryEdgeRelation,
   MemoryCompartment as MemoryCompartmentView,
   MemoryCompartmentInput,
 } from '../types/memoryGraph';
+import type {MemoryStatus} from '../types/memory';
 
 // Reinforcement bump applied to an existing edge's weight each time
 // extraction re-derives the same (source, target, relation) triple, rather
@@ -23,6 +25,13 @@ import type {
 // repeatedly-mentioned relations strengthen over time instead of piling up
 // as duplicates.
 const EDGE_REINFORCEMENT_STEP = 0.1;
+
+// A BRIDGES_TO edge is the one relation deliberately exempt from the
+// compartment firewall below — its entire purpose is to cross
+// compartments. Nothing in the extraction pipeline is allowed to emit one
+// (see validateMemoryGraphInput's VALID_RELATIONS), so this exemption only
+// ever fires for an edge some explicit, user-driven path wrote.
+const COMPARTMENT_FIREWALL_EXEMPT_RELATION: MemoryEdgeRelation = 'BRIDGES_TO';
 
 class MemoryGraphRepository {
   private nodes() {
@@ -39,7 +48,17 @@ class MemoryGraphRepository {
 
   // ---- Nodes ----------------------------------------------------------
 
-  async createNode(input: MemoryNodeInput): Promise<MemoryNodeView> {
+  /**
+   * `initialStatus` defaults to 'active' but the write-path gatekeeper
+   * (see MemoryWriteGatekeeper) passes 'quarantined' for a node whose
+   * confidence fell below the trust threshold — created so nothing is
+   * silently lost, but excluded from dedup lookups, digest retrieval, and
+   * everything else that only reads active nodes.
+   */
+  async createNode(
+    input: MemoryNodeInput,
+    initialStatus: MemoryStatus = 'active',
+  ): Promise<MemoryNodeView> {
     try {
       const created = await database.write(async () => {
         return await this.nodes().create((record: MemoryNode) => {
@@ -55,8 +74,10 @@ class MemoryGraphRepository {
           record.compartmentId = input.compartmentId;
           record.provenance = input.provenance;
           record.sourceMemoryId = input.sourceMemoryId;
+          record.sourceConversationId = input.sourceConversationId;
+          record.extractedBy = input.extractedBy;
           record.pinned = input.pinned ?? false;
-          record.status = 'active';
+          record.status = initialStatus;
           record.lastAccessedAt = undefined;
           record.accessCount = 0;
         });
@@ -71,15 +92,19 @@ class MemoryGraphRepository {
   async createNodeWithEmbedding(
     embeddingModelPath: string,
     input: MemoryNodeInput,
+    initialStatus: MemoryStatus = 'active',
   ): Promise<MemoryNodeView> {
     const vector = await embeddingEngine.embed(
       embeddingModelPath,
       input.description ? `${input.label}: ${input.description}` : input.label,
     );
-    return this.createNode({
-      ...input,
-      embedding: MemoryNode.encodeEmbedding(vector),
-    });
+    return this.createNode(
+      {
+        ...input,
+        embedding: MemoryNode.encodeEmbedding(vector),
+      },
+      initialStatus,
+    );
   }
 
   /**
@@ -98,15 +123,19 @@ class MemoryGraphRepository {
   async findOrCreateNode(
     input: MemoryNodeInput,
     embeddingModelPath?: string,
+    initialStatus: MemoryStatus = 'active',
   ): Promise<MemoryNodeView> {
     if (input.memoryType === 'episodic') {
       return embeddingModelPath
-        ? this.createNodeWithEmbedding(embeddingModelPath, input)
-        : this.createNode(input);
+        ? this.createNodeWithEmbedding(embeddingModelPath, input, initialStatus)
+        : this.createNode(input, initialStatus);
     }
 
     try {
       const clauses: Clause[] = [
+        // Dedup always matches against trusted, active nodes only — a
+        // fresh low-confidence mention of an already-established fact
+        // should resolve to the existing trusted node, not quarantine it.
         Q.where('status', 'active'),
         Q.where('kind', input.kind),
         Q.where('memory_type', 'semantic'),
@@ -134,8 +163,8 @@ class MemoryGraphRepository {
     }
 
     return embeddingModelPath
-      ? this.createNodeWithEmbedding(embeddingModelPath, input)
-      : this.createNode(input);
+      ? this.createNodeWithEmbedding(embeddingModelPath, input, initialStatus)
+      : this.createNode(input, initialStatus);
   }
 
   async getNodeById(id: string): Promise<MemoryNodeView | null> {
@@ -277,10 +306,44 @@ class MemoryGraphRepository {
         record.confidence = input.confidence ?? 0.5;
         record.provenance = input.provenance;
         record.sourceConversationId = input.sourceConversationId;
+        record.extractedBy = input.extractedBy;
         record.status = 'active';
+        record.lastAccessedAt = undefined;
+        record.accessCount = 0;
       });
     });
     return created.toView();
+  }
+
+  /**
+   * The compartment firewall: refuses to link two nodes in different
+   * compartments (private/health reasoning must never silently bleed into
+   * public/code context, or vice versa) unless the edge itself is the
+   * one relation designed to cross that boundary intentionally
+   * (BRIDGES_TO). Since nothing in the extraction pipeline can emit a
+   * BRIDGES_TO relation, this closes off cross-compartment writes to
+   * automated extraction entirely — only an explicit, future user action
+   * could ever construct one.
+   */
+  private async assertCompartmentsCompatible(
+    sourceNodeId: string,
+    targetNodeId: string,
+    relation: MemoryEdgeRelation,
+  ): Promise<void> {
+    if (relation === COMPARTMENT_FIREWALL_EXEMPT_RELATION) {
+      return;
+    }
+    const [source, target] = await Promise.all([
+      this.nodes().find(sourceNodeId),
+      this.nodes().find(targetNodeId),
+    ]);
+    if ((source.compartmentId ?? null) !== (target.compartmentId ?? null)) {
+      throw new Error(
+        `MemoryGraphRepository: refused a ${relation} edge across compartments ` +
+          `(${source.compartmentId ?? 'global'} -> ${target.compartmentId ?? 'global'}); ` +
+          'only a BRIDGES_TO edge may cross compartments',
+      );
+    }
   }
 
   /**
@@ -290,9 +353,18 @@ class MemoryGraphRepository {
    * observation. This is the graph's reinforcement mechanism: a relation
    * re-derived across many conversations should get stronger, not
    * duplicate itself into parallel edges.
+   *
+   * Enforces the compartment firewall before writing anything — see
+   * assertCompartmentsCompatible.
    */
   async upsertEdge(input: MemoryEdgeInput): Promise<MemoryEdgeView> {
     try {
+      await this.assertCompartmentsCompatible(
+        input.sourceNodeId,
+        input.targetNodeId,
+        input.relation,
+      );
+
       const existingMatches = await this.edges()
         .query(
           Q.where('source_node_id', input.sourceNodeId),
@@ -321,6 +393,72 @@ class MemoryGraphRepository {
     } catch (error) {
       console.error('MemoryGraphRepository: error upserting edge:', error);
       throw error;
+    }
+  }
+
+  async recordEdgeAccess(id: string): Promise<void> {
+    try {
+      const record = await this.edges().find(id);
+      await database.write(async () => {
+        await record.update((r: MemoryEdge) => {
+          r.accessCount = (r.accessCount || 0) + 1;
+          r.lastAccessedAt = Date.now();
+        });
+      });
+    } catch (error) {
+      console.error(
+        'MemoryGraphRepository: error recording edge access:',
+        error,
+      );
+    }
+  }
+
+  /**
+   * Automated contradiction resolution: given two nodes linked by a
+   * CONTRADICTS edge, decides a winner (higher confidence; a tie goes to
+   * the more recently created node, since a contradiction usually means
+   * the user's situation changed) and retires the loser, writing a
+   * SUPERSEDES edge from winner to loser. This is what keeps the graph
+   * self-healing instead of leaving two competing "truths" both active and
+   * both surfaced to the context injector forever. The caller decides
+   * *when* to invoke this (e.g. only for a sufficiently confident
+   * CONTRADICTS edge) — this method only knows how to resolve one.
+   */
+  async resolveContradiction(
+    nodeAId: string,
+    nodeBId: string,
+  ): Promise<{winnerId: string; loserId: string} | null> {
+    try {
+      const [nodeA, nodeB] = await Promise.all([
+        this.nodes().find(nodeAId),
+        this.nodes().find(nodeBId),
+      ]);
+
+      const aWins =
+        nodeA.confidence !== nodeB.confidence
+          ? nodeA.confidence > nodeB.confidence
+          : nodeA.createdAt.getTime() >= nodeB.createdAt.getTime();
+
+      const winner = aWins ? nodeA : nodeB;
+      const loser = aWins ? nodeB : nodeA;
+
+      await this.softDeleteNode(loser.id);
+      await this.createEdgeRecord({
+        sourceNodeId: winner.id,
+        targetNodeId: loser.id,
+        relation: 'SUPERSEDES',
+        weight: 1,
+        confidence: winner.confidence,
+        provenance: 'model_inferred',
+      });
+
+      return {winnerId: winner.id, loserId: loser.id};
+    } catch (error) {
+      console.error(
+        'MemoryGraphRepository: error resolving contradiction:',
+        error,
+      );
+      return null;
     }
   }
 

@@ -19,6 +19,15 @@ export type MemoryNodeKind =
   | 'concept'
   | 'open_thread';
 
+/**
+ * SUPERSEDES and BRIDGES_TO are system-only relations, never something the
+ * extraction model is allowed to emit directly (see
+ * validateMemoryGraphInput's VALID_RELATIONS, which deliberately excludes
+ * both). SUPERSEDES is written only by MemoryGraphRepository's own
+ * contradiction-resolution step; BRIDGES_TO is reserved for a future
+ * explicit, user-driven action — letting extraction author its own bridges
+ * would let a compartment firewall bypass itself.
+ */
 export type MemoryEdgeRelation =
   | 'SUPPORTS'
   | 'CONTRADICTS'
@@ -26,7 +35,9 @@ export type MemoryEdgeRelation =
   | 'RELATES_TO'
   | 'CAUSES'
   | 'PART_OF'
-  | 'PRECEDES';
+  | 'PRECEDES'
+  | 'SUPERSEDES'
+  | 'BRIDGES_TO';
 
 /**
  * Tulving's episodic/semantic distinction: a raw, time-stamped mention vs
@@ -61,6 +72,11 @@ export interface MemoryNode {
   provenance: MemoryProvenance;
   /** The `memories` row this node was first extracted from, if any. */
   sourceMemoryId?: string;
+  /** The chat session this node was extracted from, if any. */
+  sourceConversationId?: string;
+  /** Model signature that performed the extraction (e.g. the draft model's
+   * id, or the active chat model's id when no draft model was available). */
+  extractedBy?: string;
   pinned: boolean;
   status: MemoryStatus;
   lastAccessedAt?: string;
@@ -101,14 +117,24 @@ export interface MemoryEdge {
   confidence: number;
   provenance: MemoryProvenance;
   sourceConversationId?: string;
+  extractedBy?: string;
   status: MemoryStatus;
+  lastAccessedAt?: string;
+  accessCount: number;
   createdAt: string;
   updatedAt: string;
 }
 
 export type MemoryEdgeInput = Omit<
   MemoryEdge,
-  'id' | 'status' | 'createdAt' | 'updatedAt' | 'weight' | 'confidence'
+  | 'id'
+  | 'status'
+  | 'accessCount'
+  | 'lastAccessedAt'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'weight'
+  | 'confidence'
 > &
   Partial<Pick<MemoryEdge, 'weight' | 'confidence'>>;
 

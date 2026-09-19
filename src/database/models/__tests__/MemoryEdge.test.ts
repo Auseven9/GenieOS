@@ -9,6 +9,7 @@ function makeEdge(raw: Record<string, any> = {}): MemoryEdgeModel {
     confidence: 0.5,
     provenance: 'user_stated',
     status: 'active',
+    accessCount: 0,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-02T00:00:00Z'),
     ...raw,
@@ -30,6 +31,9 @@ describe('MemoryEdge.toView', () => {
     const edge = makeEdge({
       relation: 'SUPPORTS',
       sourceConversationId: 'session-1',
+      extractedBy: 'draft-model-id',
+      accessCount: 3,
+      lastAccessedAt: new Date('2026-01-03T00:00:00Z').getTime(),
     });
 
     const view = edge.toView();
@@ -37,6 +41,9 @@ describe('MemoryEdge.toView', () => {
     expect(view.targetNodeId).toBe('node-2');
     expect(view.relation).toBe('SUPPORTS');
     expect(view.sourceConversationId).toBe('session-1');
+    expect(view.extractedBy).toBe('draft-model-id');
+    expect(view.accessCount).toBe(3);
+    expect(view.lastAccessedAt).toBe('2026-01-03T00:00:00.000Z');
     expect(view.createdAt).toBe('2026-01-01T00:00:00.000Z');
     expect(view.updatedAt).toBe('2026-01-02T00:00:00.000Z');
   });

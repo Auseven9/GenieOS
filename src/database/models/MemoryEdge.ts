@@ -16,7 +16,10 @@ export default class MemoryEdge extends Model {
   @field('confidence') confidence!: number;
   @field('provenance') provenance!: MemoryProvenance;
   @field('source_conversation_id') sourceConversationId?: string;
+  @field('extracted_by') extractedBy?: string;
   @field('status') status!: MemoryStatus;
+  @field('last_accessed_at') lastAccessedAt?: number;
+  @field('access_count') accessCount!: number;
   @readonly @date('created_at') createdAt!: Date;
   @readonly @date('updated_at') updatedAt!: Date;
 
@@ -30,7 +33,12 @@ export default class MemoryEdge extends Model {
       confidence: this.confidence,
       provenance: this.provenance,
       sourceConversationId: this.sourceConversationId,
+      extractedBy: this.extractedBy,
       status: this.status,
+      lastAccessedAt: this.lastAccessedAt
+        ? new Date(this.lastAccessedAt).toISOString()
+        : undefined,
+      accessCount: this.accessCount,
       createdAt: this.createdAt.toISOString(),
       updatedAt: this.updatedAt.toISOString(),
     };

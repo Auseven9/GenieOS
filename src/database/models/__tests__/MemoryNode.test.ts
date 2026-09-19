@@ -51,6 +51,8 @@ describe('MemoryNode.toView', () => {
       salience: 0.6,
       compartmentId: 'compartment-1',
       sourceMemoryId: 'memory-1',
+      sourceConversationId: 'session-1',
+      extractedBy: 'draft-model-id',
       lastAccessedAt: new Date('2026-01-03T00:00:00Z').getTime(),
     });
 
@@ -62,6 +64,8 @@ describe('MemoryNode.toView', () => {
     expect(view.salience).toBe(0.6);
     expect(view.compartmentId).toBe('compartment-1');
     expect(view.sourceMemoryId).toBe('memory-1');
+    expect(view.sourceConversationId).toBe('session-1');
+    expect(view.extractedBy).toBe('draft-model-id');
     expect(view.createdAt).toBe('2026-01-01T00:00:00.000Z');
     expect(view.lastAccessedAt).toBe('2026-01-03T00:00:00.000Z');
   });

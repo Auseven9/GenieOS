@@ -6,6 +6,7 @@ const mockNodeFetch = jest.fn();
 const mockNodeFind = jest.fn();
 const mockEdgeCreate = jest.fn();
 const mockEdgeFetch = jest.fn();
+const mockEdgeFind = jest.fn();
 const mockCompartmentCreate = jest.fn();
 const mockCompartmentFetch = jest.fn();
 const mockWrite = jest.fn((callback: () => Promise<any>) => callback());
@@ -30,6 +31,7 @@ jest.mock('../../database', () => ({
             query: (...clauses: any[]) => ({
               fetch: () => mockEdgeFetch(...clauses),
             }),
+            find: (id: string) => mockEdgeFind(id),
           };
         }
         if (table === 'memory_compartments') {
@@ -201,6 +203,9 @@ describe('MemoryGraphRepository.upsertEdge', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockWrite.mockImplementation((callback: () => Promise<any>) => callback());
+    // Both nodes in the same (no) compartment by default, so the
+    // compartment firewall passes unless a test overrides this.
+    mockNodeFind.mockImplementation(async (id: string) => makeNodeRecord({id}));
   });
 
   it('creates a new edge when none exists between the two nodes for that relation', async () => {
@@ -257,6 +262,126 @@ describe('MemoryGraphRepository.upsertEdge', () => {
     });
 
     expect(result.weight).toBe(1);
+  });
+
+  it('refuses an edge across two different compartments', async () => {
+    mockNodeFind.mockImplementation(async (id: string) =>
+      makeNodeRecord({id, compartmentId: id === 'node-1' ? 'work' : 'home'}),
+    );
+
+    await expect(
+      memoryGraphRepository.upsertEdge({
+        sourceNodeId: 'node-1',
+        targetNodeId: 'node-2',
+        relation: 'MENTIONS',
+        provenance: 'user_stated',
+      }),
+    ).rejects.toThrow(/compartments/);
+    expect(mockEdgeCreate).not.toHaveBeenCalled();
+  });
+
+  it('allows a BRIDGES_TO edge across two different compartments', async () => {
+    mockNodeFind.mockImplementation(async (id: string) =>
+      makeNodeRecord({id, compartmentId: id === 'node-1' ? 'work' : 'home'}),
+    );
+    mockEdgeFetch.mockResolvedValue([]);
+    mockEdgeCreate.mockImplementation((mutator: (record: any) => void) => {
+      const record = makeEdgeRecord({relation: 'BRIDGES_TO'});
+      mutator(record);
+      return record;
+    });
+
+    const result = await memoryGraphRepository.upsertEdge({
+      sourceNodeId: 'node-1',
+      targetNodeId: 'node-2',
+      relation: 'BRIDGES_TO',
+      provenance: 'user_stated',
+    });
+
+    expect(result.relation).toBe('BRIDGES_TO');
+  });
+});
+
+describe('MemoryGraphRepository.resolveContradiction', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockWrite.mockImplementation((callback: () => Promise<any>) => callback());
+  });
+
+  it('retires the lower-confidence node and writes a SUPERSEDES edge from the winner', async () => {
+    const winner = makeNodeRecord({id: 'node-winner', confidence: 0.9});
+    const loser = makeNodeRecord({id: 'node-loser', confidence: 0.3});
+    loser.update = async (mutator: (record: any) => void) => mutator(loser);
+    mockNodeFind.mockImplementation(async (id: string) =>
+      id === 'node-winner' ? winner : loser,
+    );
+    mockEdgeCreate.mockImplementation((mutator: (record: any) => void) => {
+      const record = makeEdgeRecord({relation: 'SUPERSEDES'});
+      mutator(record);
+      return record;
+    });
+
+    const result = await memoryGraphRepository.resolveContradiction(
+      'node-winner',
+      'node-loser',
+    );
+
+    expect(result).toEqual({winnerId: 'node-winner', loserId: 'node-loser'});
+    expect(loser.status).toBe('retired');
+    expect(mockEdgeCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('breaks a confidence tie in favor of the more recently created node', async () => {
+    const older = makeNodeRecord({
+      id: 'node-older',
+      confidence: 0.5,
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+    });
+    const newer = makeNodeRecord({
+      id: 'node-newer',
+      confidence: 0.5,
+      createdAt: new Date('2026-06-01T00:00:00Z'),
+    });
+    older.update = async (mutator: (record: any) => void) => mutator(older);
+    mockNodeFind.mockImplementation(async (id: string) =>
+      id === 'node-older' ? older : newer,
+    );
+    mockEdgeCreate.mockImplementation((mutator: (record: any) => void) => {
+      const record = makeEdgeRecord({relation: 'SUPERSEDES'});
+      mutator(record);
+      return record;
+    });
+
+    const result = await memoryGraphRepository.resolveContradiction(
+      'node-older',
+      'node-newer',
+    );
+
+    expect(result).toEqual({winnerId: 'node-newer', loserId: 'node-older'});
+  });
+
+  it('returns null and logs rather than throwing when a node cannot be found', async () => {
+    mockNodeFind.mockRejectedValue(new Error('not found'));
+    const result = await memoryGraphRepository.resolveContradiction('a', 'b');
+    expect(result).toBeNull();
+  });
+});
+
+describe('MemoryGraphRepository.recordEdgeAccess', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockWrite.mockImplementation((callback: () => Promise<any>) => callback());
+  });
+
+  it('increments access count and sets last accessed time', async () => {
+    const edge = makeEdgeRecord({accessCount: 2, lastAccessedAt: undefined});
+    edge.update = async (mutator: (record: any) => void) => mutator(edge);
+    mockEdgeFind.mockResolvedValue(edge);
+
+    await memoryGraphRepository.recordEdgeAccess('edge-1');
+
+    expect(edge.accessCount).toBe(3);
+    expect(edge.lastAccessedAt).toEqual(expect.any(Number));
   });
 });
 

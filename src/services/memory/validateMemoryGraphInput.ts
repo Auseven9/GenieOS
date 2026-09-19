@@ -22,6 +22,11 @@ export const VALID_MEMORY_TYPES: MemoryNodeMemoryType[] = [
   'semantic',
 ];
 
+// Deliberately excludes SUPERSEDES and BRIDGES_TO: those are system-only
+// relations (see MemoryEdgeRelation) that extraction is never allowed to
+// author itself — SUPERSEDES only comes from MemoryGraphRepository's own
+// contradiction resolution, and letting extraction author its own
+// BRIDGES_TO edge would let it bypass the compartment firewall.
 export const VALID_RELATIONS: MemoryEdgeRelation[] = [
   'SUPPORTS',
   'CONTRADICTS',
