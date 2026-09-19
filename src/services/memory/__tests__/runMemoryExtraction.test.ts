@@ -5,6 +5,8 @@ const mockCreateMemory = jest.fn();
 const mockCreateMemoryWithEmbedding = jest.fn();
 const mockCompletion = jest.fn();
 const mockConvertToChatMessages = jest.fn();
+const mockGetModelFullPath = jest.fn();
+const mockDraftComplete = jest.fn();
 
 jest.mock('../../../repositories/MemorySettingsRepository', () => ({
   __esModule: true,
@@ -37,12 +39,21 @@ jest.mock('../../../utils/chat', () => ({
 jest.mock('../../../store', () => ({
   modelStore: {
     engine: {completion: (...args: any[]) => mockCompletion(...args)},
+    activeModel: undefined,
+    contextInitParams: {},
+    models: [],
+    getModelFullPath: (...args: any[]) => mockGetModelFullPath(...args),
   },
   chatSessionStore: {isGenerating: false},
 }));
 
+jest.mock('../DraftCompletionEngine', () => ({
+  __esModule: true,
+  default: {complete: (...args: any[]) => mockDraftComplete(...args)},
+}));
+
 import {maybeRunMemoryExtraction} from '../runMemoryExtraction';
-import {chatSessionStore} from '../../../store';
+import {chatSessionStore, modelStore} from '../../../store';
 
 function makeSessionMessage(overrides: Record<string, any> = {}) {
   return {toMessageObject: () => ({id: 'ui-msg', ...overrides})};
@@ -52,9 +63,13 @@ describe('maybeRunMemoryExtraction', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (chatSessionStore as any).isGenerating = false;
+    (modelStore as any).activeModel = undefined;
+    (modelStore as any).contextInitParams = {};
+    (modelStore as any).models = [];
     mockIsMemoryEnabled.mockResolvedValue(true);
     mockGetEmbeddingModelPath.mockResolvedValue(undefined);
     mockCompletion.mockResolvedValue({text: '[]'});
+    mockDraftComplete.mockResolvedValue('[]');
     mockConvertToChatMessages.mockReturnValue([]);
   });
 
@@ -154,6 +169,74 @@ describe('maybeRunMemoryExtraction', () => {
     await expect(
       maybeRunMemoryExtraction('session-1'),
     ).resolves.toBeUndefined();
+  });
+
+  it('uses the standalone draft model engine when a downloaded draft model is configured', async () => {
+    (modelStore as any).activeModel = {id: 'chat-model'};
+    (modelStore as any).contextInitParams = {
+      selectedDraftModelId: 'draft-model',
+    };
+    (modelStore as any).models = [
+      {id: 'draft-model', isDownloaded: true},
+      {id: 'chat-model', isDownloaded: true},
+    ];
+    mockGetModelFullPath.mockResolvedValue('/models/draft.gguf');
+    mockGetSessionById.mockResolvedValue({messages: [makeSessionMessage()]});
+    mockConvertToChatMessages.mockReturnValue([
+      {role: 'user', content: 'I like dark mode'},
+    ]);
+    mockDraftComplete.mockResolvedValue(
+      JSON.stringify([{content: 'likes dark mode'}]),
+    );
+
+    await maybeRunMemoryExtraction('session-1');
+
+    expect(mockGetModelFullPath).toHaveBeenCalledWith({
+      id: 'draft-model',
+      isDownloaded: true,
+    });
+    expect(mockDraftComplete).toHaveBeenCalledWith(
+      '/models/draft.gguf',
+      expect.any(String),
+      expect.objectContaining({jsonSchema: expect.any(Object)}),
+    );
+    expect(mockCompletion).not.toHaveBeenCalled();
+    expect(mockCreateMemory).toHaveBeenCalledWith(
+      expect.objectContaining({content: 'likes dark mode'}),
+    );
+  });
+
+  it('falls back to the active chat engine when the draft model is not downloaded', async () => {
+    (modelStore as any).activeModel = {id: 'chat-model'};
+    (modelStore as any).contextInitParams = {
+      selectedDraftModelId: 'draft-model',
+    };
+    (modelStore as any).models = [{id: 'draft-model', isDownloaded: false}];
+    mockGetSessionById.mockResolvedValue({messages: [makeSessionMessage()]});
+    mockConvertToChatMessages.mockReturnValue([
+      {role: 'user', content: 'hello'},
+    ]);
+    mockCompletion.mockResolvedValue({text: '[]'});
+
+    await maybeRunMemoryExtraction('session-1');
+
+    expect(mockDraftComplete).not.toHaveBeenCalled();
+    expect(mockCompletion).toHaveBeenCalled();
+  });
+
+  it('falls back to the active chat engine when no draft model is paired', async () => {
+    (modelStore as any).activeModel = {id: 'chat-model'};
+    (modelStore as any).contextInitParams = {};
+    mockGetSessionById.mockResolvedValue({messages: [makeSessionMessage()]});
+    mockConvertToChatMessages.mockReturnValue([
+      {role: 'user', content: 'hello'},
+    ]);
+    mockCompletion.mockResolvedValue({text: '[]'});
+
+    await maybeRunMemoryExtraction('session-1');
+
+    expect(mockDraftComplete).not.toHaveBeenCalled();
+    expect(mockCompletion).toHaveBeenCalled();
   });
 
   it('does nothing when there is no active model engine', async () => {

@@ -1,8 +1,10 @@
 import {modelStore, chatSessionStore} from '../../store';
+import {resolveDraftModelId} from '../../store/draftResolution';
 import {chatSessionRepository} from '../../repositories/ChatSessionRepository';
 import memoryRepository from '../../repositories/MemoryRepository';
 import memorySettingsRepository from '../../repositories/MemorySettingsRepository';
 import {convertToChatMessages} from '../../utils/chat';
+import draftCompletionEngine from './DraftCompletionEngine';
 import {
   extractMemoryCandidates,
   type ConversationTurn,
@@ -38,20 +40,67 @@ const MEMORY_CANDIDATE_SCHEMA = {
 };
 
 /**
- * Wraps whichever completion engine is currently active (local or remote —
- * same modelStore.engine used by useStructuredOutput) into the plain
- * text-in/text-out shape MemoryExtractionPipeline expects. Schema-
- * constrained, so the model is far less likely to return anything
- * malformed than the passive "please respond with JSON only" instruction
- * alone — extractMemoryCandidates still defends against it regardless.
+ * Resolves the file path of the configured draft model — the small model
+ * paired for speculative decoding with the active chat model — for use as
+ * an independent completion engine. Reuses resolveDraftModelId() (plain ID
+ * lookup) rather than resolveDraftCandidate(), since the latter's
+ * MTP-capability/embedding-width checks only guard speculative-decoding
+ * pairing validity and don't apply to running the draft model standalone.
  *
- * Uses the active model rather than a standalone draft-model completion
- * path: loading the draft model independently of its speculative-decoding
- * role would be new engine-lifecycle work of its own, out of scope here.
+ * Returns undefined (never throws) whenever no draft model is configured
+ * or downloaded, so callers can fall back to the active chat model instead.
+ */
+async function resolveDraftModelPath(): Promise<string | undefined> {
+  const activeModel = modelStore.activeModel;
+  if (!activeModel) {
+    return undefined;
+  }
+  const draftId = resolveDraftModelId(
+    activeModel,
+    modelStore.contextInitParams.selectedDraftModelId,
+  );
+  if (!draftId) {
+    return undefined;
+  }
+  const draftModel = modelStore.models.find(m => m.id === draftId);
+  if (!draftModel || !draftModel.isDownloaded) {
+    return undefined;
+  }
+  try {
+    return await modelStore.getModelFullPath(draftModel);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Builds the plain text-in/text-out completion function
+ * MemoryExtractionPipeline expects. Schema-constrained via
+ * response_format.json_schema — llama.rn's own completion() converts this
+ * into the native grammar/json_schema constraint for local llama.cpp
+ * contexts, and the OpenAI-compatible remote engine forwards it verbatim,
+ * so this one shape works for either backend. extractMemoryCandidates
+ * still defends against malformed output regardless.
+ *
+ * Three-model architecture: prefers the small draft model, loaded as its
+ * own independent context so it reasons about what to remember without
+ * borrowing whichever chat model is currently active. Falls back to the
+ * active chat model's engine only when no draft model is configured/
+ * downloaded, so extraction still works before that pairing is set up.
  */
 async function createModelCompletionFn(): Promise<
   (prompt: string) => Promise<string>
 > {
+  const draftModelPath = await resolveDraftModelPath();
+  if (draftModelPath) {
+    return (prompt: string) =>
+      draftCompletionEngine.complete(draftModelPath, prompt, {
+        jsonSchema: MEMORY_CANDIDATE_SCHEMA,
+        temperature: 0.2,
+        nPredict: 1000,
+      });
+  }
+
   const engine = modelStore.engine;
   if (!engine) {
     throw new Error('runMemoryExtraction: no active model engine');
