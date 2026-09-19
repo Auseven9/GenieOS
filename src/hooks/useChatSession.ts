@@ -40,6 +40,7 @@ import {
 import type {ToolDefinition} from '../services/talents/types';
 import memorySettingsRepository from '../repositories/MemorySettingsRepository';
 import {buildMemoryDigest} from '../services/memory/MemoryDigestBuilder';
+import {maybeRunMemoryExtraction} from '../services/memory/runMemoryExtraction';
 import {
   agentStateReducer,
   createTriggerMarkerCache,
@@ -494,6 +495,16 @@ async function applyEventToStore(
       } catch (ttsErr) {
         console.warn('[useChatSession] TTS complete hook failed:', ttsErr);
       }
+      // Fire-and-forget: never awaited, so it cannot delay anything the
+      // user sees. maybeRunMemoryExtraction is a no-op unless memory is
+      // enabled, and separately guards against running while the engine
+      // is still busy with this very turn.
+      maybeRunMemoryExtraction(ctx.sessionId).catch(extractionErr => {
+        console.warn(
+          '[useChatSession] memory extraction failed:',
+          extractionErr,
+        );
+      });
       return;
     }
     case 'run_failed':

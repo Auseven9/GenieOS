@@ -17,7 +17,11 @@ import {chatSessionRepository} from '../repositories/ChatSessionRepository';
 import {defaultCompletionParams} from '../utils/completionSettingsVersions';
 import {derivedText} from '../utils/chat';
 import {palStore} from './PalStore';
-import {deriveToolSchemas} from '../services/talents';
+import {deriveToolSchemas, talentRegistry} from '../services/talents';
+import type {ToolDefinition} from '../services/talents/types';
+import {RememberEngine} from '../services/talents/RememberEngine';
+import {ForgetEngine} from '../services/talents/ForgetEngine';
+import memorySettingsRepository from '../repositories/MemorySettingsRepository';
 import {AgentUiState, initialAgentUiState} from '../services/agent';
 
 /**
@@ -1545,6 +1549,39 @@ class ChatSessionStore {
           resolvedSettings = {...resolvedSettings, tools: pactTools};
         }
       }
+    }
+
+    // Memory tools are a global capability, not a per-Pal pact.talents
+    // grant (see RememberEngine's own comment on why) — added last, after
+    // every other tool-list path above, so no override branch can strip
+    // them once memory is on. Must never break settings resolution itself:
+    // wrapped defensively on top of the fact that every call inside
+    // already resolves to a safe default on its own failure.
+    try {
+      const memoryEnabled = await memorySettingsRepository.isMemoryEnabled();
+      if (memoryEnabled) {
+        const embeddingModelPath =
+          await memorySettingsRepository.getEmbeddingModelPath();
+        const rememberEngine = new RememberEngine(embeddingModelPath);
+        const forgetEngine = new ForgetEngine();
+        talentRegistry.register(rememberEngine);
+        talentRegistry.register(forgetEngine);
+        const existingTools =
+          (resolvedSettings.tools as ToolDefinition[] | undefined) ?? [];
+        resolvedSettings = {
+          ...resolvedSettings,
+          tools: [
+            ...existingTools,
+            rememberEngine.toToolDefinition(),
+            forgetEngine.toToolDefinition(),
+          ],
+        };
+      }
+    } catch (error) {
+      console.error(
+        'ChatSessionStore: enabling memory tools failed, continuing without them:',
+        error,
+      );
     }
 
     return resolvedSettings;

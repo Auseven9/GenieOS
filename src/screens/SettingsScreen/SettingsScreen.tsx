@@ -57,6 +57,7 @@ import {
   ttsStore,
   searchProviderStore,
 } from '../../store';
+import {MemorySettingsSection} from './MemorySettingsSection';
 import type {SearchProviderId} from '../../services/search/types';
 
 import {CacheType, ModelType} from '../../utils/types';
@@ -1375,6 +1376,8 @@ export const SettingsScreen: React.FC = observer(() => {
               </View>
             </Card.Content>
           </Card>
+
+          <MemorySettingsSection />
 
           {/* Cache & Storage Settings - iOS only (for Shortcuts) */}
           {Platform.OS === 'ios' && (
