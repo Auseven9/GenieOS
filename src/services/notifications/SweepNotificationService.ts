@@ -4,6 +4,7 @@ import notifee, {
 } from '@notifee/react-native';
 
 import {uiStore} from '../../store';
+import {logSweepEvent} from '../memory/MemorySweepLog';
 
 // Android needs a channel before a notification can post to it (API 26+);
 // notifee's createChannel is idempotent by id, but skipping the repeat call
@@ -32,8 +33,18 @@ async function ensureAndroidChannel(): Promise<void> {
 export async function ensureNotificationPermission(): Promise<boolean> {
   try {
     const settings = await notifee.requestPermission();
-    return settings.authorizationStatus >= AuthorizationStatus.AUTHORIZED;
+    const granted =
+      settings.authorizationStatus >= AuthorizationStatus.AUTHORIZED;
+    await logSweepEvent(
+      `Notification permission ${granted ? 'granted' : 'denied'}`,
+    );
+    return granted;
   } catch (error) {
+    await logSweepEvent(
+      `Notification permission request failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
     console.error(
       'SweepNotificationService: permission request failed:',
       error,
@@ -68,7 +79,13 @@ export async function notifySweepComplete(): Promise<void> {
         smallIcon: 'ic_launcher',
       },
     });
+    await logSweepEvent('Sweep-complete notification shown');
   } catch (error) {
+    await logSweepEvent(
+      `Failed to show sweep-complete notification: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
     console.error(
       'SweepNotificationService: failed to display notification:',
       error,

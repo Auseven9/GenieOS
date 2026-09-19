@@ -54,6 +54,11 @@ jest.mock('../AndroidBackgroundSweepScheduler', () => ({
     mockCancelAndroidBackgroundSweep(...args),
 }));
 
+const mockLogSweepEvent = jest.fn();
+jest.mock('../MemorySweepLog', () => ({
+  logSweepEvent: (...args: any[]) => mockLogSweepEvent(...args),
+}));
+
 import {
   maybeRunIdleSweep,
   forceRunIdleSweep,
@@ -73,6 +78,7 @@ describe('maybeRunIdleSweep', () => {
     mockRunMemorySweep.mockResolvedValue(undefined);
     (memorySettingsStore as any).sweepNotificationsEnabled = false;
     mockNotifySweepComplete.mockResolvedValue(undefined);
+    mockLogSweepEvent.mockResolvedValue(undefined);
   });
 
   it('does nothing when memory is disabled', async () => {
@@ -142,6 +148,34 @@ describe('maybeRunIdleSweep', () => {
     mockIsMemoryEnabled.mockRejectedValue(new Error('db exploded'));
     await expect(maybeRunIdleSweep()).resolves.toBeUndefined();
     expect(mockRunMemorySweep).not.toHaveBeenCalled();
+  });
+
+  it('tags the diagnostic log with source=foreground by default', async () => {
+    await maybeRunIdleSweep();
+    expect(mockLogSweepEvent).toHaveBeenCalledWith(
+      expect.stringContaining('source=foreground'),
+    );
+  });
+
+  it('tags the diagnostic log with source=background when invoked that way', async () => {
+    await maybeRunIdleSweep('background');
+    expect(mockLogSweepEvent).toHaveBeenCalledWith(
+      expect.stringContaining('source=background'),
+    );
+  });
+
+  it('logs a failure with the error message and source', async () => {
+    mockRunMemorySweep.mockRejectedValue(new Error('sweep exploded'));
+    await maybeRunIdleSweep('background');
+    expect(mockLogSweepEvent).toHaveBeenCalledWith(
+      expect.stringMatching(/source=background.*sweep exploded/),
+    );
+  });
+
+  it('does not log anything when gated out before running', async () => {
+    mockIsMemoryEnabled.mockResolvedValue(false);
+    await maybeRunIdleSweep();
+    expect(mockLogSweepEvent).not.toHaveBeenCalled();
   });
 });
 

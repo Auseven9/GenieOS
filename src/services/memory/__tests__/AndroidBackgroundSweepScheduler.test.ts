@@ -1,5 +1,6 @@
 const mockSchedule = jest.fn();
 const mockCancel = jest.fn();
+const mockLogSweepEvent = jest.fn();
 
 function loadWithModule(nativeModule: unknown) {
   let mod!: typeof import('../AndroidBackgroundSweepScheduler');
@@ -7,6 +8,9 @@ function loadWithModule(nativeModule: unknown) {
     jest.doMock('../../../specs/NativeMemorySweepScheduler', () => ({
       __esModule: true,
       default: nativeModule,
+    }));
+    jest.doMock('../MemorySweepLog', () => ({
+      logSweepEvent: (...args: any[]) => mockLogSweepEvent(...args),
     }));
     mod = require('../AndroidBackgroundSweepScheduler');
   });
@@ -18,6 +22,8 @@ describe('AndroidBackgroundSweepScheduler', () => {
     jest.resetModules();
     mockSchedule.mockReset();
     mockCancel.mockReset();
+    mockLogSweepEvent.mockReset();
+    mockLogSweepEvent.mockResolvedValue(undefined);
   });
 
   it('schedules the periodic sweep with the given interval', async () => {
@@ -30,9 +36,12 @@ describe('AndroidBackgroundSweepScheduler', () => {
     await scheduleAndroidBackgroundSweep(24);
 
     expect(mockSchedule).toHaveBeenCalledWith(24);
+    expect(mockLogSweepEvent).toHaveBeenCalledWith(
+      expect.stringContaining('24h'),
+    );
   });
 
-  it('swallows a schedule failure rather than throwing', async () => {
+  it('swallows a schedule failure rather than throwing, and logs it', async () => {
     mockSchedule.mockRejectedValue(new Error('native error'));
     const {scheduleAndroidBackgroundSweep} = loadWithModule({
       schedulePeriodicSweep: mockSchedule,
@@ -40,6 +49,9 @@ describe('AndroidBackgroundSweepScheduler', () => {
     });
 
     await expect(scheduleAndroidBackgroundSweep(24)).resolves.toBeUndefined();
+    expect(mockLogSweepEvent).toHaveBeenCalledWith(
+      expect.stringContaining('native error'),
+    );
   });
 
   it('cancels the periodic sweep', async () => {
@@ -52,6 +64,9 @@ describe('AndroidBackgroundSweepScheduler', () => {
     await cancelAndroidBackgroundSweep();
 
     expect(mockCancel).toHaveBeenCalled();
+    expect(mockLogSweepEvent).toHaveBeenCalledWith(
+      expect.stringContaining('cancelled'),
+    );
   });
 
   it('swallows a cancel failure rather than throwing', async () => {
@@ -72,5 +87,6 @@ describe('AndroidBackgroundSweepScheduler', () => {
     await expect(cancelAndroidBackgroundSweep()).resolves.toBeUndefined();
     expect(mockSchedule).not.toHaveBeenCalled();
     expect(mockCancel).not.toHaveBeenCalled();
+    expect(mockLogSweepEvent).not.toHaveBeenCalled();
   });
 });

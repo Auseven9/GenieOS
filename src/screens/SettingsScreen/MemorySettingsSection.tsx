@@ -1,10 +1,11 @@
 import React, {useContext, useEffect, useState, useCallback} from 'react';
-import {View, Platform, Alert} from 'react-native';
+import {View, Platform, Alert, ScrollView} from 'react-native';
 
 import {observer} from 'mobx-react-lite';
 import {Text, Card, Button, Switch, SegmentedButtons} from 'react-native-paper';
 import {pick, types} from '@react-native-documents/picker';
 import * as RNFS from '@dr.pogodin/react-native-fs';
+import Clipboard from '@react-native-clipboard/clipboard';
 
 import {Divider} from '../../components';
 import {L10nContext} from '../../utils';
@@ -18,6 +19,11 @@ import {
 } from '../../repositories/MemorySettingsRepository';
 import {forceRunIdleSweep} from '../../services/memory/MemorySweepScheduler';
 import {getWorldviewSummary} from '../../services/memory/MemorySweepPipeline';
+import {
+  getSweepLog,
+  clearSweepLog,
+  type SweepLogEntry,
+} from '../../services/memory/MemorySweepLog';
 import {ensureNotificationPermission} from '../../services/notifications/SweepNotificationService';
 
 // Separate from models/local (full chat models added via ModelsScreen) —
@@ -69,6 +75,7 @@ export const MemorySettingsSection = observer(() => {
     undefined,
   );
   const [isSweeping, setIsSweeping] = useState(false);
+  const [logEntries, setLogEntries] = useState<SweepLogEntry[]>([]);
 
   const refreshWorldviewSummary = useCallback(() => {
     getWorldviewSummary()
@@ -78,9 +85,18 @@ export const MemorySettingsSection = observer(() => {
       });
   }, []);
 
+  const refreshLog = useCallback(() => {
+    getSweepLog()
+      .then(setLogEntries)
+      .catch(() => {
+        // getSweepLog already logs; nothing more to do here.
+      });
+  }, []);
+
   useEffect(() => {
     refreshWorldviewSummary();
-  }, [refreshWorldviewSummary]);
+    refreshLog();
+  }, [refreshWorldviewSummary, refreshLog]);
 
   const handlePickEmbeddingModel = async () => {
     try {
@@ -117,9 +133,35 @@ export const MemorySettingsSection = observer(() => {
     try {
       await forceRunIdleSweep();
       refreshWorldviewSummary();
+      refreshLog();
     } finally {
       setIsSweeping(false);
     }
+  };
+
+  const handleCopyLog = () => {
+    const logText = logEntries
+      .map(entry => `${new Date(entry.ts).toLocaleString()}  ${entry.message}`)
+      .join('\n');
+    Clipboard.setString(logText);
+    Alert.alert('', l10n.settings.memoryDiagnosticsCopiedMessage);
+  };
+
+  const handleClearLog = () => {
+    Alert.alert(
+      l10n.settings.memoryDiagnosticsClearConfirmTitle,
+      l10n.settings.memoryDiagnosticsClearConfirmMessage,
+      [
+        {text: l10n.common.cancel, style: 'cancel'},
+        {
+          text: l10n.common.clear,
+          style: 'destructive',
+          onPress: () => {
+            clearSweepLog().then(refreshLog);
+          },
+        },
+      ],
+    );
   };
 
   const handleToggleSweepNotifications = async (value: boolean) => {
@@ -297,6 +339,56 @@ export const MemorySettingsSection = observer(() => {
                 <Text variant="labelSmall" style={styles.textDescription}>
                   {worldviewSummary || l10n.settings.memoryWorldviewEmpty}
                 </Text>
+              </View>
+
+              <Divider style={styles.divider} />
+
+              <View style={styles.settingItemContainer}>
+                <Text variant="titleMedium" style={styles.textLabel}>
+                  {l10n.settings.memoryDiagnosticsLabel}
+                </Text>
+                <Text variant="labelSmall" style={styles.textDescription}>
+                  {l10n.settings.memoryDiagnosticsDescription}
+                </Text>
+                <ScrollView
+                  testID="memory-diagnostics-log-scroll"
+                  style={styles.logScrollContainer}>
+                  {logEntries.length === 0 ? (
+                    <Text variant="labelSmall" style={styles.logText}>
+                      {l10n.settings.memoryDiagnosticsEmpty}
+                    </Text>
+                  ) : (
+                    logEntries
+                      .slice()
+                      .reverse()
+                      .map((entry, index) => (
+                        <Text
+                          key={`${entry.ts}-${index}`}
+                          variant="labelSmall"
+                          style={styles.logText}>
+                          {`${new Date(entry.ts).toLocaleTimeString()}  ${
+                            entry.message
+                          }`}
+                        </Text>
+                      ))
+                  )}
+                </ScrollView>
+                <View style={styles.logButtonRow}>
+                  <Button
+                    testID="memory-diagnostics-clear-button"
+                    mode="text"
+                    onPress={handleClearLog}
+                    disabled={logEntries.length === 0}>
+                    {l10n.common.clear}
+                  </Button>
+                  <Button
+                    testID="memory-diagnostics-copy-button"
+                    mode="outlined"
+                    onPress={handleCopyLog}
+                    disabled={logEntries.length === 0}>
+                    {l10n.settings.memoryDiagnosticsCopyButton}
+                  </Button>
+                </View>
               </View>
             </>
           )}

@@ -1,4 +1,5 @@
 import MemorySweepSchedulerModule from '../../specs/NativeMemorySweepScheduler';
+import {logSweepEvent} from './MemorySweepLog';
 
 /**
  * Thin wrapper around the Android-only TurboModule that controls the
@@ -24,7 +25,10 @@ export async function scheduleAndroidBackgroundSweep(
   }
   try {
     await MemorySweepSchedulerModule.schedulePeriodicSweep(intervalHours);
+    await logSweepEvent(`Background job scheduled: every ${intervalHours}h`);
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await logSweepEvent(`Failed to schedule background job: ${message}`);
     console.error('AndroidBackgroundSweepScheduler: schedule failed:', error);
   }
 }
@@ -35,7 +39,10 @@ export async function cancelAndroidBackgroundSweep(): Promise<void> {
   }
   try {
     await MemorySweepSchedulerModule.cancelPeriodicSweep();
+    await logSweepEvent('Background job cancelled');
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await logSweepEvent(`Failed to cancel background job: ${message}`);
     console.error('AndroidBackgroundSweepScheduler: cancel failed:', error);
   }
 }

@@ -1,5 +1,6 @@
 import {modelStore} from '../../store';
 import {maybeRunIdleSweep} from './MemorySweepScheduler';
+import {logSweepEvent} from './MemorySweepLog';
 
 /**
  * Entry point for Android's HeadlessJsTaskService (see
@@ -18,6 +19,12 @@ import {maybeRunIdleSweep} from './MemorySweepScheduler';
  * the AppState foreground-check path only (see MemorySweepScheduler).
  */
 export default async function memorySweepHeadlessTask(): Promise<void> {
+  // The single most valuable log line this whole diagnostic log produces:
+  // if this never shows up, WorkManager's job either never fired or the
+  // native service crashed before JS ever ran — which itself is the
+  // answer, even though nothing after this point could have recorded it.
+  await logSweepEvent('Android headless task invoked');
   await modelStore.whenReady;
-  await maybeRunIdleSweep();
+  await maybeRunIdleSweep('background');
+  await logSweepEvent('Android headless task finished');
 }

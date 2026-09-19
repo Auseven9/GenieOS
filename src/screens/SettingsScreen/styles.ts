@@ -1,4 +1,4 @@
-import {StyleSheet} from 'react-native';
+import {StyleSheet, Platform} from 'react-native';
 
 import {Theme} from '../../utils/types';
 
@@ -126,5 +126,26 @@ export const createStyles = (theme: Theme) =>
     },
     segmentedButtons: {
       marginVertical: 8,
+    },
+    // Bounded scroll area for the sweep diagnostics log — unlike Text, a
+    // ScrollView actually scrolls, so a growing log never pushes the rest
+    // of Settings off-screen.
+    logScrollContainer: {
+      maxHeight: 200,
+      marginTop: 8,
+      marginBottom: 8,
+      borderRadius: 8,
+      backgroundColor: theme.colors.surfaceVariant,
+      padding: 8,
+    },
+    logText: {
+      fontFamily: Platform.select({ios: 'Menlo', default: 'monospace'}),
+      fontSize: 11,
+      color: theme.colors.onSurfaceVariant,
+    },
+    logButtonRow: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      gap: 8,
     },
   });

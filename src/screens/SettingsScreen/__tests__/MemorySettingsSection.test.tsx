@@ -22,6 +22,18 @@ jest.mock('../../../services/notifications/SweepNotificationService', () => ({
     mockEnsureNotificationPermission(...args),
 }));
 
+const mockGetSweepLog = jest.fn();
+const mockClearSweepLog = jest.fn();
+jest.mock('../../../services/memory/MemorySweepLog', () => ({
+  getSweepLog: (...args: any[]) => mockGetSweepLog(...args),
+  clearSweepLog: (...args: any[]) => mockClearSweepLog(...args),
+}));
+
+const mockClipboardSetString = jest.fn();
+jest.mock('@react-native-clipboard/clipboard', () => ({
+  setString: (...args: any[]) => mockClipboardSetString(...args),
+}));
+
 describe('MemorySettingsSection', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -34,6 +46,8 @@ describe('MemorySettingsSection', () => {
     mockGetWorldviewSummary.mockResolvedValue(undefined);
     mockForceRunIdleSweep.mockResolvedValue(undefined);
     mockEnsureNotificationPermission.mockResolvedValue(true);
+    mockGetSweepLog.mockResolvedValue([]);
+    mockClearSweepLog.mockResolvedValue(undefined);
   });
 
   it('hides idle-sweep and worldview controls while memory itself is off', () => {
@@ -174,6 +188,88 @@ describe('MemorySettingsSection', () => {
       expect(
         memorySettingsStore.setSweepNotificationsEnabled,
       ).toHaveBeenCalledWith(false);
+    });
+  });
+
+  describe('diagnostics log', () => {
+    it('shows the empty state when no log entries exist', async () => {
+      memorySettingsStore.enabled = true;
+      mockGetSweepLog.mockResolvedValue([]);
+      const {getByText} = render(<MemorySettingsSection />);
+
+      await waitFor(() => {
+        expect(getByText('No sweep activity recorded yet.')).toBeTruthy();
+      });
+    });
+
+    it('renders log entries newest first', async () => {
+      memorySettingsStore.enabled = true;
+      mockGetSweepLog.mockResolvedValue([
+        {ts: 1700000000000, message: 'first event'},
+        {ts: 1700000001000, message: 'second event'},
+      ]);
+      const {getByText, findAllByText} = render(<MemorySettingsSection />);
+
+      await waitFor(() => {
+        expect(getByText(/second event/)).toBeTruthy();
+      });
+      const rendered = await findAllByText(/event/);
+      expect(rendered[0].props.children).toContain('second event');
+      expect(rendered[1].props.children).toContain('first event');
+    });
+
+    it('copies the log to the clipboard', async () => {
+      memorySettingsStore.enabled = true;
+      mockGetSweepLog.mockResolvedValue([
+        {ts: 1700000000000, message: 'an event'},
+      ]);
+      const {getByText, getByTestId} = render(<MemorySettingsSection />);
+
+      await waitFor(() => {
+        expect(getByText(/an event/)).toBeTruthy();
+      });
+      fireEvent.press(getByTestId('memory-diagnostics-copy-button'));
+
+      expect(mockClipboardSetString).toHaveBeenCalledWith(
+        expect.stringContaining('an event'),
+      );
+    });
+
+    it('disables copy/clear when the log is empty', async () => {
+      memorySettingsStore.enabled = true;
+      mockGetSweepLog.mockResolvedValue([]);
+      const {getByTestId} = render(<MemorySettingsSection />);
+
+      await waitFor(() => {
+        expect(
+          getByTestId('memory-diagnostics-copy-button').props.accessibilityState
+            ?.disabled,
+        ).toBe(true);
+      });
+    });
+
+    it('confirms before clearing, then refreshes the log', async () => {
+      memorySettingsStore.enabled = true;
+      mockGetSweepLog.mockResolvedValue([
+        {ts: 1700000000000, message: 'an event'},
+      ]);
+      const alertSpy = jest
+        .spyOn(Alert, 'alert')
+        .mockImplementation((_title, _message, buttons) => {
+          const confirm = buttons?.find(b => b.style === 'destructive');
+          confirm?.onPress?.();
+        });
+      const {getByText, getByTestId} = render(<MemorySettingsSection />);
+
+      await waitFor(() => {
+        expect(getByText(/an event/)).toBeTruthy();
+      });
+      fireEvent.press(getByTestId('memory-diagnostics-clear-button'));
+
+      await waitFor(() => {
+        expect(mockClearSweepLog).toHaveBeenCalledTimes(1);
+      });
+      alertSpy.mockRestore();
     });
   });
 });

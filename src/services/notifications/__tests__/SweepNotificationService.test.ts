@@ -16,6 +16,11 @@ jest.mock('@notifee/react-native', () => ({
   AuthorizationStatus: {DENIED: 0, AUTHORIZED: 1, PROVISIONAL: 2},
 }));
 
+const mockLogSweepEvent = jest.fn();
+jest.mock('../../memory/MemorySweepLog', () => ({
+  logSweepEvent: (...args: any[]) => mockLogSweepEvent(...args),
+}));
+
 import {
   ensureNotificationPermission,
   notifySweepComplete,
@@ -24,22 +29,32 @@ import {
 describe('SweepNotificationService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockLogSweepEvent.mockResolvedValue(undefined);
   });
 
   describe('ensureNotificationPermission', () => {
     it('returns true when authorized', async () => {
       mockRequestPermission.mockResolvedValue({authorizationStatus: 1});
       await expect(ensureNotificationPermission()).resolves.toBe(true);
+      expect(mockLogSweepEvent).toHaveBeenCalledWith(
+        expect.stringContaining('granted'),
+      );
     });
 
     it('returns false when denied', async () => {
       mockRequestPermission.mockResolvedValue({authorizationStatus: 0});
       await expect(ensureNotificationPermission()).resolves.toBe(false);
+      expect(mockLogSweepEvent).toHaveBeenCalledWith(
+        expect.stringContaining('denied'),
+      );
     });
 
     it('returns false rather than throwing when the request itself fails', async () => {
       mockRequestPermission.mockRejectedValue(new Error('native error'));
       await expect(ensureNotificationPermission()).resolves.toBe(false);
+      expect(mockLogSweepEvent).toHaveBeenCalledWith(
+        expect.stringContaining('native error'),
+      );
     });
   });
 
@@ -66,6 +81,9 @@ describe('SweepNotificationService', () => {
           body: expect.any(String),
         }),
       );
+      expect(mockLogSweepEvent).toHaveBeenCalledWith(
+        expect.stringContaining('shown'),
+      );
     });
 
     it('never includes memory content, only the fixed generic strings', async () => {
@@ -78,9 +96,12 @@ describe('SweepNotificationService', () => {
       expect(mockDisplayNotification.mock.calls[0]).toHaveLength(1);
     });
 
-    it('swallows errors rather than throwing', async () => {
+    it('swallows errors rather than throwing, logging the failure', async () => {
       mockGetNotificationSettings.mockRejectedValue(new Error('boom'));
       await expect(notifySweepComplete()).resolves.toBeUndefined();
+      expect(mockLogSweepEvent).toHaveBeenCalledWith(
+        expect.stringContaining('boom'),
+      );
     });
   });
 });

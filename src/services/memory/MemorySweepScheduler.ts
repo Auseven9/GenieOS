@@ -7,6 +7,13 @@ import {
   scheduleAndroidBackgroundSweep,
   cancelAndroidBackgroundSweep,
 } from './AndroidBackgroundSweepScheduler';
+import {logSweepEvent} from './MemorySweepLog';
+
+/** Which trigger reached runIfDue — recorded in the diagnostic log so it's
+ * possible to tell, without a PC, whether the Android background path
+ * ('background') is actually firing at all, versus only the ordinary
+ * foreground/manual paths. */
+export type SweepSource = 'foreground' | 'background' | 'manual';
 
 /**
  * Decides *when* an idle sweep should run. There is no OS-level background
@@ -19,7 +26,10 @@ import {
  * backgrounded.
  */
 
-async function runIfDue(options: {ignoreInterval: boolean}): Promise<void> {
+async function runIfDue(options: {
+  ignoreInterval: boolean;
+  source: SweepSource;
+}): Promise<void> {
   try {
     const [memoryEnabled, idleSweepEnabled] = await Promise.all([
       memorySettingsRepository.isMemoryEnabled(),
@@ -50,7 +60,9 @@ async function runIfDue(options: {ignoreInterval: boolean}): Promise<void> {
     await memorySettingsRepository.setLastSweepAt(startedAt);
     memorySettingsStore.reportSweepRan(startedAt);
 
+    await logSweepEvent(`Sweep starting (source=${options.source})`);
     await runMemorySweep(embeddingModelPath);
+    await logSweepEvent(`Sweep completed (source=${options.source})`);
 
     // Shared by both trigger paths — the foreground AppState check (both
     // platforms) and Android's background headless task — since both call
@@ -61,12 +73,16 @@ async function runIfDue(options: {ignoreInterval: boolean}): Promise<void> {
       await notifySweepComplete();
     }
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await logSweepEvent(`Sweep failed (source=${options.source}): ${message}`);
     console.error('MemorySweepScheduler: idle sweep check failed:', error);
   }
 }
 
-async function maybeRunIdleSweep(): Promise<void> {
-  await runIfDue({ignoreInterval: false});
+async function maybeRunIdleSweep(
+  source: Extract<SweepSource, 'foreground' | 'background'> = 'foreground',
+): Promise<void> {
+  await runIfDue({ignoreInterval: false, source});
 }
 
 /**
@@ -76,14 +92,14 @@ async function maybeRunIdleSweep(): Promise<void> {
  * never while the visible turn is generating).
  */
 async function forceRunIdleSweep(): Promise<void> {
-  await runIfDue({ignoreInterval: true});
+  await runIfDue({ignoreInterval: true, source: 'manual'});
 }
 
 let appState: AppStateStatus = AppState.currentState;
 
 function handleAppStateChange(nextAppState: AppStateStatus) {
   if (appState !== 'active' && nextAppState === 'active') {
-    maybeRunIdleSweep().catch(() => {});
+    maybeRunIdleSweep('foreground').catch(() => {});
   }
   appState = nextAppState;
 }
