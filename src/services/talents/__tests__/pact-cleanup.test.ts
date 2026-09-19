@@ -142,12 +142,14 @@ describe('PACT cleanup: deriveToolSchemas()', () => {
     expect(talentRegistry.getAll()).toHaveLength(0);
 
     const schemas = deriveToolSchemas();
-    expect(schemas).toHaveLength(5);
+    expect(schemas).toHaveLength(7);
 
     const names = schemas.map(s => s.function.name).sort();
     expect(names).toEqual([
       'calculate',
       'datetime',
+      'get_crypto_price',
+      'get_weather',
       'read_url',
       'render_html',
       'web_search',
@@ -175,7 +177,7 @@ describe('PACT cleanup: deriveToolSchemas()', () => {
       tool_choice: 'auto' as const,
       jinja: true,
     };
-    expect(completionSettings.tools).toHaveLength(5);
+    expect(completionSettings.tools).toHaveLength(7);
     expect(completionSettings.tools[0].type).toBe('function');
   });
 });

@@ -153,5 +153,137 @@ export default schemaMigrations({
         }),
       ],
     },
+    // Migration to version 9: Add memories table (long-term memory store)
+    {
+      toVersion: 9,
+      steps: [
+        createTable({
+          name: 'memories',
+          columns: [
+            {name: 'kind', type: 'string', isIndexed: true},
+            {name: 'content', type: 'string'},
+            {name: 'embedding', type: 'string', isOptional: true},
+            {name: 'confidence', type: 'number'},
+            {name: 'valence', type: 'number', isOptional: true},
+            {name: 'intensity', type: 'number', isOptional: true},
+            {name: 'provenance', type: 'string', isIndexed: true},
+            {
+              name: 'source_conversation_id',
+              type: 'string',
+              isOptional: true,
+            },
+            {name: 'tags', type: 'string'},
+            {name: 'pinned', type: 'boolean'},
+            {name: 'superseded_by', type: 'string', isOptional: true},
+            {name: 'status', type: 'string', isIndexed: true},
+            {name: 'last_accessed_at', type: 'number', isOptional: true},
+            {name: 'access_count', type: 'number'},
+            {name: 'created_at', type: 'number'},
+            {name: 'updated_at', type: 'number'},
+          ],
+        }),
+      ],
+    },
+    // Migration to version 10: associative memory graph (nodes, typed
+    // edges, and scoping compartments) layered on top of the flat
+    // `memories` store.
+    {
+      toVersion: 10,
+      steps: [
+        createTable({
+          name: 'memory_compartments',
+          columns: [
+            {name: 'name', type: 'string', isIndexed: true},
+            {name: 'description', type: 'string', isOptional: true},
+            {name: 'created_at', type: 'number'},
+            {name: 'updated_at', type: 'number'},
+          ],
+        }),
+        createTable({
+          name: 'memory_nodes',
+          columns: [
+            {name: 'label', type: 'string', isIndexed: true},
+            {name: 'kind', type: 'string', isIndexed: true},
+            {name: 'description', type: 'string', isOptional: true},
+            {name: 'embedding', type: 'string', isOptional: true},
+            {name: 'confidence', type: 'number'},
+            {name: 'valence', type: 'number', isOptional: true},
+            {name: 'intensity', type: 'number', isOptional: true},
+            {
+              name: 'compartment_id',
+              type: 'string',
+              isOptional: true,
+              isIndexed: true,
+            },
+            {name: 'provenance', type: 'string', isIndexed: true},
+            {name: 'source_memory_id', type: 'string', isOptional: true},
+            {name: 'pinned', type: 'boolean'},
+            {name: 'status', type: 'string', isIndexed: true},
+            {name: 'last_accessed_at', type: 'number', isOptional: true},
+            {name: 'access_count', type: 'number'},
+            {name: 'created_at', type: 'number'},
+            {name: 'updated_at', type: 'number'},
+          ],
+        }),
+        createTable({
+          name: 'memory_edges',
+          columns: [
+            {name: 'source_node_id', type: 'string', isIndexed: true},
+            {name: 'target_node_id', type: 'string', isIndexed: true},
+            {name: 'relation', type: 'string', isIndexed: true},
+            {name: 'weight', type: 'number'},
+            {name: 'confidence', type: 'number'},
+            {name: 'provenance', type: 'string', isIndexed: true},
+            {
+              name: 'source_conversation_id',
+              type: 'string',
+              isOptional: true,
+            },
+            {name: 'status', type: 'string', isIndexed: true},
+            {name: 'created_at', type: 'number'},
+            {name: 'updated_at', type: 'number'},
+          ],
+        }),
+      ],
+    },
+    // Migration to version 11: Tulving episodic/semantic split and node
+    // salience, so extraction can capture the full psychological texture
+    // of a memory (not just what it says, but what kind of memory it is
+    // and how central it is) from the start.
+    {
+      toVersion: 11,
+      steps: [
+        addColumns({
+          table: 'memory_nodes',
+          columns: [
+            {name: 'memory_type', type: 'string', isIndexed: true},
+            {name: 'salience', type: 'number', isOptional: true},
+          ],
+        }),
+      ],
+    },
+    // Migration to version 12: provenance/audit fields (extracted_by,
+    // source_conversation_id on nodes; extracted_by + access tracking on
+    // edges) for the write-path security/audit layer.
+    {
+      toVersion: 12,
+      steps: [
+        addColumns({
+          table: 'memory_nodes',
+          columns: [
+            {name: 'source_conversation_id', type: 'string', isOptional: true},
+            {name: 'extracted_by', type: 'string', isOptional: true},
+          ],
+        }),
+        addColumns({
+          table: 'memory_edges',
+          columns: [
+            {name: 'extracted_by', type: 'string', isOptional: true},
+            {name: 'last_accessed_at', type: 'number', isOptional: true},
+            {name: 'access_count', type: 'number'},
+          ],
+        }),
+      ],
+    },
   ],
 });

@@ -26,6 +26,7 @@ const EXPECTED_SECTIONS = [
   'palsScreen',
   'validation',
   'camera',
+  'notifications',
   'video',
   'screenTitles',
   'chat',

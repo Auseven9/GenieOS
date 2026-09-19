@@ -62,6 +62,8 @@ import {mockServerStore} from '../__mocks__/stores/serverStore';
 import {mockTTSStore} from '../__mocks__/stores/ttsStore';
 import {checkoutFlowStore as mockCheckoutFlowStore} from '../__mocks__/stores/checkoutFlowStore';
 import {mockSearchProviderStore} from '../__mocks__/stores/searchProviderStore';
+import {memorySettingsStore as mockMemorySettingsStore} from '../__mocks__/stores/memorySettingsStore';
+import {chatCompactionStore as mockChatCompactionStore} from '../__mocks__/stores/chatCompactionStore';
 
 jest.mock('@react-native-clipboard/clipboard', () => mockClipboard);
 
@@ -121,6 +123,8 @@ jest.mock('../src/store', () => {
     ttsStore: mockTTSStore,
     checkoutFlowStore: mockCheckoutFlowStore,
     searchProviderStore: mockSearchProviderStore,
+    memorySettingsStore: mockMemorySettingsStore,
+    chatCompactionStore: mockChatCompactionStore,
     defaultCompletionSettings: mockDefaultCompletionSettings,
   };
 });
@@ -167,6 +171,29 @@ jest.mock('react-native-share', () => ({
 
 jest.mock('react-native-image-picker');
 jest.mock('react-native-vision-camera');
+
+// Can't use a bare automock here: notifee's real module throws synchronously
+// at import time when no native module is linked (as in the test
+// environment), and automocking still requires requiring the real module
+// first to infer its shape — so it throws before jest can replace it.
+jest.mock('@notifee/react-native', () => ({
+  __esModule: true,
+  default: {
+    requestPermission: jest.fn().mockResolvedValue({authorizationStatus: 1}),
+    getNotificationSettings: jest
+      .fn()
+      .mockResolvedValue({authorizationStatus: 1}),
+    createChannel: jest.fn().mockResolvedValue('memory-sweeps'),
+    displayNotification: jest.fn().mockResolvedValue('notification-id'),
+  },
+  AndroidImportance: {LOW: 2, DEFAULT: 3, HIGH: 4},
+  AuthorizationStatus: {
+    NOT_DETERMINED: -1,
+    DENIED: 0,
+    AUTHORIZED: 1,
+    PROVISIONAL: 2,
+  },
+}));
 
 jest.mock('../src/database', () => {
   return {

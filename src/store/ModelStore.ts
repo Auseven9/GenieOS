@@ -243,6 +243,15 @@ class ModelStore {
   // every launch (see drainPendingProjectionCleanup).
   pendingProjectionCleanupIds: string[] = [];
 
+  /** Resolves once persisted state has hydrated and initializeStore() has
+   * completed — models/activeModel/contextInitParams are only reliably
+   * populated after this settles. A plain Promise reference has no
+   * reactive shape mobx should track, so it's excluded via the
+   * makeAutoObservable annotations below. The Android headless memory-sweep
+   * task has no App.tsx mount to trigger this store's usual bootstrap, so
+   * it awaits this before reading any model state. */
+  whenReady: Promise<void> = Promise.resolve();
+
   constructor() {
     makeAutoObservable(this, {
       activeModel: computed,
@@ -250,8 +259,9 @@ class ModelStore {
       contextId: computed,
       remoteModels: computed,
       activeDownloads: computed,
+      whenReady: false,
     });
-    makePersistable(this, {
+    this.whenReady = makePersistable(this, {
       name: 'ModelStore',
       properties: [
         'models',
@@ -270,7 +280,7 @@ class ModelStore {
       storage: AsyncStorage,
     }).then(async () => {
       await this.initializeThreadCount();
-      this.initializeStore();
+      await this.initializeStore();
     });
 
     this.setupAppStateListener();
@@ -2143,6 +2153,26 @@ class ModelStore {
     runInAction(() => {
       this.benchmarkActive = false;
     });
+  };
+
+  /**
+   * Runs `fn` serialized against the same mutex that guards
+   * initContext()/_releaseContextInternal() — for the one caller outside
+   * this store that loads its own independent LlamaContext
+   * (DraftCompletionEngine, used by the idle memory sweep, including the
+   * Android background sweep that can run with no chat UI open at all).
+   * Without this, a background sweep loading the draft model and a
+   * foreground model switch could allocate two native llama.cpp contexts
+   * at the same instant — a real OOM/crash risk on a memory-constrained
+   * device.
+   */
+  runExclusiveContextOperation = <T>(fn: () => Promise<T>): Promise<T> => {
+    const operationPromise = this.contextOperationMutex.then(fn);
+    this.contextOperationMutex = operationPromise.then(
+      () => {},
+      () => {},
+    );
+    return operationPromise;
   };
 
   /**

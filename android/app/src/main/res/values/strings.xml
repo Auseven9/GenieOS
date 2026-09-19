@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">PocketPal</string>
+    <string name="memory_sweep_running_notification">PocketPal is tidying up memory</string>
 </resources>

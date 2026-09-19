@@ -116,6 +116,16 @@ export function convertToChatMessages(
 ): ChatMessage[] {
   const groups: ChatMessage[][] = messages
     .filter(message => {
+      // Compacted-away messages are excluded from what's resent as raw
+      // history — that detail was deliberately folded into a summary
+      // message by ChatCompactionService. The summary message itself is
+      // NOT excluded here: it flows to the model as an ordinary message,
+      // in its correct chronological position, same as any other text
+      // message — that's the only way its content actually reaches the
+      // model.
+      if (message.metadata?.compacted) {
+        return false;
+      }
       if (message.type === 'assistant_turn') {
         // Include any AssistantTurn whose steps array is non-empty.
         // Filter rule preserves turns where a step has only tool_calls

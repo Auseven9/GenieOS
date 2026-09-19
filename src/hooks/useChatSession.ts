@@ -38,6 +38,10 @@ import {
   talentRegistry,
 } from '../services/talents';
 import type {ToolDefinition} from '../services/talents/types';
+import memorySettingsRepository from '../repositories/MemorySettingsRepository';
+import {buildMemoryDigest} from '../services/memory/MemoryDigestBuilder';
+import {maybeRunMemoryExtraction} from '../services/memory/runMemoryExtraction';
+import {maybeCompactSession} from '../services/chat/ChatCompactionService';
 import {
   agentStateReducer,
   createTriggerMarkerCache,
@@ -139,6 +143,36 @@ const prepareCompletion = async ({
     now: new Date(),
     maxToolTurns: DEFAULT_MAX_TURNS,
   });
+
+  // Memory retrieval must never be able to break a conversation: both the
+  // settings lookups and buildMemoryDigest itself already swallow their own
+  // errors and resolve to a safe "nothing to add" value (false/undefined/
+  // null), but this still guards against something unexpected escaping
+  // that contract.
+  uiStore.clearMemoryRecall();
+  try {
+    const memoryEnabled = await memorySettingsRepository.isMemoryEnabled();
+    if (memoryEnabled) {
+      const embeddingModelPath =
+        await memorySettingsRepository.getEmbeddingModelPath();
+      const memoryDigest = await buildMemoryDigest({
+        embeddingModelPath,
+        queryText: message.text,
+      });
+      if (memoryDigest) {
+        systemPromptFragments.push(memoryDigest.text);
+        uiStore.setMemoryRecall({
+          count: memoryDigest.includedCount,
+          snippets: memoryDigest.includedSnippets,
+        });
+      }
+    }
+  } catch (error) {
+    console.error(
+      'useChatSession: memory digest failed, continuing without it:',
+      error,
+    );
+  }
 
   const messages = assembleMessages(systemMessages, systemPromptFragments, [
     ...chatMessages,
@@ -465,6 +499,22 @@ async function applyEventToStore(
       } catch (ttsErr) {
         console.warn('[useChatSession] TTS complete hook failed:', ttsErr);
       }
+      // Fire-and-forget: never awaited, so it cannot delay anything the
+      // user sees. maybeRunMemoryExtraction is a no-op unless memory is
+      // enabled, and separately guards against running while the engine
+      // is still busy with this very turn.
+      maybeRunMemoryExtraction(ctx.sessionId).catch(extractionErr => {
+        console.warn(
+          '[useChatSession] memory extraction failed:',
+          extractionErr,
+        );
+      });
+      // Fire-and-forget, same as memory extraction above: a no-op unless
+      // auto-compaction is enabled, and it separately guards against
+      // running while the engine is still busy with this very turn.
+      maybeCompactSession(ctx.sessionId).catch(compactionErr => {
+        console.warn('[useChatSession] chat compaction failed:', compactionErr);
+      });
       return;
     }
     case 'run_failed':

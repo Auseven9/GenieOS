@@ -3,8 +3,11 @@ import {CalculateEngine} from './CalculateEngine';
 import {DatetimeEngine} from './DatetimeEngine';
 import {WebSearchEngine} from './WebSearchEngine';
 import {ReadUrlEngine} from './ReadUrlEngine';
+import {WeatherEngine} from './WeatherEngine';
+import {CryptoEngine} from './CryptoEngine';
 import {talentRegistry} from './TalentRegistry';
 import type {SearchAccess} from './searchAccess';
+import type {KeylessApiAccess} from './keylessApiAccess';
 import type {ToolDefinition, SystemPromptContext} from './types';
 import {searchProviderStore} from '../../store/SearchProviderStore';
 import {createSearchProvider, readWithDefaultReader} from '../search';
@@ -17,7 +20,10 @@ export {CalculateEngine} from './CalculateEngine';
 export {DatetimeEngine} from './DatetimeEngine';
 export {WebSearchEngine} from './WebSearchEngine';
 export {ReadUrlEngine} from './ReadUrlEngine';
+export {WeatherEngine} from './WeatherEngine';
+export {CryptoEngine} from './CryptoEngine';
 export type {SearchAccess} from './searchAccess';
+export type {KeylessApiAccess} from './keylessApiAccess';
 // Deliberately narrow: the raw allowlist writers stay module-internal so all
 // writes happen inside services/talents (seed at run start, WebSearchEngine
 // per search).
@@ -45,6 +51,17 @@ function createSearchAccess(): SearchAccess {
   };
 }
 
+/**
+ * Reuses the same Internet Search consent the user already grants for
+ * web_search/read_url — see keylessApiAccess.ts for why a keyless public
+ * API call doesn't get its own separate consent toggle.
+ */
+function createKeylessApiAccess(): KeylessApiAccess {
+  return {
+    isEnabled: () => searchProviderStore.hasConsentedToSearch,
+  };
+}
+
 let registered = false;
 
 /**
@@ -62,6 +79,9 @@ export function registerDefaultTalents(): void {
   const searchAccess = createSearchAccess();
   talentRegistry.register(new WebSearchEngine(searchAccess));
   talentRegistry.register(new ReadUrlEngine(searchAccess));
+  const keylessApiAccess = createKeylessApiAccess();
+  talentRegistry.register(new WeatherEngine(keylessApiAccess));
+  talentRegistry.register(new CryptoEngine(keylessApiAccess));
   registered = true;
 }
 

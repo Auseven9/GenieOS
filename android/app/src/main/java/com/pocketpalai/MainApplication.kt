@@ -18,6 +18,7 @@ import com.pocketpal.StorefrontPackage
 import com.pocketpal.AuthSessionPackage
 import com.pocketpal.ExternalContentLinkPackage
 import com.pocketpal.download.DownloadPackage
+import com.pocketpal.memorysweep.MemorySweepPackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -33,6 +34,7 @@ class MainApplication : Application(), ReactApplication {
               add(AuthSessionPackage())
               add(ExternalContentLinkPackage())
               add(DownloadPackage())
+              add(MemorySweepPackage())
             }
 
         override fun getJSMainModuleName(): String = "index"

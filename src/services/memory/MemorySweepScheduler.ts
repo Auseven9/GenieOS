@@ -1,0 +1,157 @@
+import {AppState, type AppStateStatus} from 'react-native';
+import {chatSessionStore, memorySettingsStore} from '../../store';
+import memorySettingsRepository from '../../repositories/MemorySettingsRepository';
+import {runMemorySweep} from './MemorySweepPipeline';
+import {notifySweepComplete} from '../notifications/SweepNotificationService';
+import {
+  scheduleAndroidBackgroundSweep,
+  cancelAndroidBackgroundSweep,
+} from './AndroidBackgroundSweepScheduler';
+import {logSweepEvent} from './MemorySweepLog';
+
+/** Which trigger reached runIfDue — recorded in the diagnostic log so it's
+ * possible to tell, without a PC, whether the Android background path
+ * ('background') is actually firing at all, versus only the ordinary
+ * foreground/manual paths. */
+export type SweepSource = 'foreground' | 'background' | 'manual';
+
+/**
+ * Decides *when* an idle sweep should run. There is no OS-level background
+ * scheduler backing this (React Native has none without a native module
+ * this app doesn't have) — the honest mechanism available is "check when
+ * the app comes back to the foreground, gated by how long it's been since
+ * the last sweep," the same pattern ServerStore already uses for its own
+ * foreground refetch-throttling. A sweep genuinely due while the app stays
+ * backgrounded runs the next time it's opened, not on a timer while
+ * backgrounded.
+ */
+
+async function runIfDue(options: {
+  ignoreInterval: boolean;
+  source: SweepSource;
+}): Promise<void> {
+  try {
+    const [memoryEnabled, idleSweepEnabled] = await Promise.all([
+      memorySettingsRepository.isMemoryEnabled(),
+      memorySettingsRepository.isIdleSweepEnabled(),
+    ]);
+    if (!memoryEnabled || !idleSweepEnabled) {
+      return;
+    }
+    // Never compete with the visible turn's own completion() call.
+    if (chatSessionStore.isGenerating) {
+      return;
+    }
+
+    const [intervalHours, lastSweepAt, embeddingModelPath] = await Promise.all([
+      memorySettingsRepository.getIdleSweepIntervalHours(),
+      memorySettingsRepository.getLastSweepAt(),
+      memorySettingsRepository.getEmbeddingModelPath(),
+    ]);
+    const dueAt = (lastSweepAt ?? 0) + intervalHours * 60 * 60 * 1000;
+    if (!options.ignoreInterval && Date.now() < dueAt) {
+      return;
+    }
+
+    // Recorded before the sweep runs, not after: a sweep that throws
+    // partway through still counts as "attempted around now," so a
+    // failing step can't retry-storm on every subsequent foreground event.
+    const startedAt = Date.now();
+    await memorySettingsRepository.setLastSweepAt(startedAt);
+    memorySettingsStore.reportSweepRan(startedAt);
+
+    await logSweepEvent(`Sweep starting (source=${options.source})`);
+    await runMemorySweep(embeddingModelPath);
+    await logSweepEvent(`Sweep completed (source=${options.source})`);
+
+    // Shared by both trigger paths — the foreground AppState check (both
+    // platforms) and Android's background headless task — since both call
+    // runIfDue. notifee's local notifications work on iOS too, so this
+    // setting is available there even though the background-while-closed
+    // trigger itself is Android-only.
+    if (memorySettingsStore.sweepNotificationsEnabled) {
+      await notifySweepComplete();
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await logSweepEvent(`Sweep failed (source=${options.source}): ${message}`);
+    console.error('MemorySweepScheduler: idle sweep check failed:', error);
+  }
+}
+
+async function maybeRunIdleSweep(
+  source: Extract<SweepSource, 'foreground' | 'background'> = 'foreground',
+): Promise<void> {
+  await runIfDue({ignoreInterval: false, source});
+}
+
+/**
+ * Runs a sweep right now, bypassing the interval check — the settings
+ * screen's manual "Sweep now" button. Still respects the same safety
+ * gates as the automatic check (memory/idle-sweep must be enabled, and
+ * never while the visible turn is generating).
+ */
+async function forceRunIdleSweep(): Promise<void> {
+  await runIfDue({ignoreInterval: true, source: 'manual'});
+}
+
+let appState: AppStateStatus = AppState.currentState;
+
+function handleAppStateChange(nextAppState: AppStateStatus) {
+  if (appState !== 'active' && nextAppState === 'active') {
+    maybeRunIdleSweep('foreground').catch(() => {});
+  }
+  appState = nextAppState;
+}
+
+/**
+ * Reconciles Android's periodic WorkManager job against currently
+ * persisted settings — reads the repository directly rather than the
+ * store, since the store's own hydration may not have finished yet this
+ * early in app startup. Runs on every cold start (idempotent either way:
+ * enqueueUniquePeriodicWork with UPDATE just re-applies the same interval
+ * when nothing changed) so an app update, a cleared WorkManager job
+ * database, or a setting enabled before this feature existed all
+ * self-heal without the user having to re-toggle anything.
+ */
+async function reconcileAndroidBackgroundSweep(): Promise<void> {
+  try {
+    const [memoryEnabled, idleSweepEnabled, intervalHours] = await Promise.all([
+      memorySettingsRepository.isMemoryEnabled(),
+      memorySettingsRepository.isIdleSweepEnabled(),
+      memorySettingsRepository.getIdleSweepIntervalHours(),
+    ]);
+    if (memoryEnabled && idleSweepEnabled) {
+      await scheduleAndroidBackgroundSweep(intervalHours);
+    } else {
+      await cancelAndroidBackgroundSweep();
+    }
+  } catch (error) {
+    console.error(
+      'MemorySweepScheduler: background sweep reconciliation failed:',
+      error,
+    );
+  }
+}
+
+let initialized = false;
+
+/**
+ * Registers the foreground-transition check once for the app's lifetime.
+ * Idempotent — safe to call from an effect that could run more than once
+ * (e.g. React StrictMode's double-invoked effects in development).
+ */
+export function initMemorySweepScheduler(): void {
+  if (initialized) {
+    return;
+  }
+  initialized = true;
+  AppState.addEventListener('change', handleAppStateChange);
+  reconcileAndroidBackgroundSweep().catch(() => {});
+  // Cold start counts as "the user just arrived" too — otherwise a sweep
+  // would never fire until the user backgrounds and reopens the app at
+  // least once after enabling it.
+  maybeRunIdleSweep().catch(() => {});
+}
+
+export {maybeRunIdleSweep, forceRunIdleSweep};

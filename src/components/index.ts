@@ -35,6 +35,7 @@ export * from './KeyboardAccessoryView';
 export * from './LanguageSelector';
 export * from './LoadingBubble';
 export * from './MarkdownView';
+export * from './MemoryRecallSnackbar';
 export * from './PendingIndicator';
 export * from './Menu';
 export * from './Message';

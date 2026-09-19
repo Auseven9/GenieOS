@@ -1,7 +1,7 @@
 import {appSchema, tableSchema} from '@nozbe/watermelondb';
 
 export default appSchema({
-  version: 8,
+  version: 12,
   tables: [
     tableSchema({
       name: 'chat_sessions',
@@ -127,6 +127,101 @@ export default appSchema({
         {name: 'generation_settings', type: 'string', isOptional: true}, // JSON stringified
         {name: 'pact', type: 'string', isOptional: true}, // JSON stringified { talents: TalentRef[] }
         {name: 'greeting', type: 'string', isOptional: true}, // JSON stringified Pal['greeting']
+        {name: 'created_at', type: 'number'},
+        {name: 'updated_at', type: 'number'},
+      ],
+    }),
+    // Long-term memory: durable facts/preferences/events extracted from
+    // conversations, retrieved by relevance rather than replayed as raw
+    // transcript. See src/types/memory.ts for the field semantics.
+    tableSchema({
+      name: 'memories',
+      columns: [
+        {name: 'kind', type: 'string', isIndexed: true},
+        {name: 'content', type: 'string'},
+        {name: 'embedding', type: 'string', isOptional: true}, // base64 Float32Array
+        {name: 'confidence', type: 'number'},
+        {name: 'valence', type: 'number', isOptional: true},
+        {name: 'intensity', type: 'number', isOptional: true},
+        {name: 'provenance', type: 'string', isIndexed: true},
+        {name: 'source_conversation_id', type: 'string', isOptional: true},
+        {name: 'tags', type: 'string'}, // JSON stringified string[]
+        {name: 'pinned', type: 'boolean'},
+        {name: 'superseded_by', type: 'string', isOptional: true},
+        {name: 'status', type: 'string', isIndexed: true}, // 'active' | 'retired'
+        {name: 'last_accessed_at', type: 'number', isOptional: true},
+        {name: 'access_count', type: 'number'},
+        {name: 'created_at', type: 'number'},
+        {name: 'updated_at', type: 'number'},
+      ],
+    }),
+    // Associative memory graph: canonical entity/topic nodes and the typed
+    // relations Gemma's extraction pass draws between them, scoped by
+    // compartment. See src/types/memoryGraph.ts for field semantics.
+    tableSchema({
+      name: 'memory_compartments',
+      columns: [
+        {name: 'name', type: 'string', isIndexed: true},
+        {name: 'description', type: 'string', isOptional: true},
+        {name: 'created_at', type: 'number'},
+        {name: 'updated_at', type: 'number'},
+      ],
+    }),
+    tableSchema({
+      name: 'memory_nodes',
+      columns: [
+        {name: 'label', type: 'string', isIndexed: true},
+        {name: 'kind', type: 'string', isIndexed: true},
+        // Tulving's episodic/semantic split: a raw, time-stamped mention vs
+        // an abstracted, consolidated axiom. Orthogonal to `kind` (what
+        // category of thing the node is).
+        {name: 'memory_type', type: 'string', isIndexed: true},
+        {name: 'description', type: 'string', isOptional: true},
+        {name: 'embedding', type: 'string', isOptional: true}, // base64 Float32Array
+        {name: 'confidence', type: 'number'},
+        {name: 'valence', type: 'number', isOptional: true},
+        {name: 'intensity', type: 'number', isOptional: true},
+        // How central this node is to the user's core profile, independent
+        // of emotional charge (`intensity`) or truth certainty (`confidence`).
+        {name: 'salience', type: 'number', isOptional: true},
+        {
+          name: 'compartment_id',
+          type: 'string',
+          isOptional: true,
+          isIndexed: true,
+        },
+        {name: 'provenance', type: 'string', isIndexed: true},
+        {name: 'source_memory_id', type: 'string', isOptional: true},
+        {name: 'source_conversation_id', type: 'string', isOptional: true},
+        // Model signature that performed the extraction, e.g. the draft
+        // model's id — the audit trail for "where did this come from".
+        {name: 'extracted_by', type: 'string', isOptional: true},
+        {name: 'pinned', type: 'boolean'},
+        {name: 'status', type: 'string', isIndexed: true}, // 'active' | 'retired' | 'quarantined'
+        {name: 'last_accessed_at', type: 'number', isOptional: true},
+        {name: 'access_count', type: 'number'},
+        {name: 'created_at', type: 'number'},
+        {name: 'updated_at', type: 'number'},
+      ],
+    }),
+    tableSchema({
+      name: 'memory_edges',
+      columns: [
+        {name: 'source_node_id', type: 'string', isIndexed: true},
+        {name: 'target_node_id', type: 'string', isIndexed: true},
+        {name: 'relation', type: 'string', isIndexed: true}, // SUPPORTS | CONTRADICTS | MENTIONS | ...
+        {name: 'weight', type: 'number'},
+        {name: 'confidence', type: 'number'},
+        {name: 'provenance', type: 'string', isIndexed: true},
+        {name: 'extracted_by', type: 'string', isOptional: true},
+        {name: 'last_accessed_at', type: 'number', isOptional: true},
+        {name: 'access_count', type: 'number'},
+        {
+          name: 'source_conversation_id',
+          type: 'string',
+          isOptional: true,
+        },
+        {name: 'status', type: 'string', isIndexed: true}, // 'active' | 'retired'
         {name: 'created_at', type: 'number'},
         {name: 'updated_at', type: 'number'},
       ],

@@ -2,6 +2,9 @@
 #
 .DS_Store
 
+# Claude Code local scratch (agent worktrees, session state)
+.claude/
+
 # Xcode
 #
 build/

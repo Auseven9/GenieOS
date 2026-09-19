@@ -237,6 +237,59 @@ describe('convertToChatMessages', () => {
       },
     ] as ChatMessage[]);
   });
+
+  it('excludes messages compacted away by ChatCompactionService', () => {
+    const messages: MessageType.Any[] = [
+      {
+        id: '1',
+        author: user,
+        text: 'a message that has since been summarized',
+        type: 'text',
+        createdAt: Date.now(),
+        metadata: {compacted: true},
+      } as MessageType.Text,
+      {
+        id: '2',
+        author: assistant,
+        text: 'still here',
+        type: 'text',
+        createdAt: Date.now(),
+      },
+    ];
+
+    const result = convertToChatMessages(messages, true);
+
+    expect(result).toEqual([
+      {role: 'assistant', content: 'still here'},
+    ] as ChatMessage[]);
+  });
+
+  it('does not exclude a compaction-summary message — it flows through as an ordinary message, the only way its content reaches the model', () => {
+    const messages: MessageType.Any[] = [
+      {
+        id: '1',
+        author: assistant,
+        text: 'Conversation compacted...summary text',
+        type: 'text',
+        createdAt: Date.now(),
+        metadata: {system: true, compactionSummary: true},
+      } as MessageType.Text,
+      {
+        id: '2',
+        author: user,
+        text: 'a follow-up question',
+        type: 'text',
+        createdAt: Date.now(),
+      },
+    ];
+
+    const result = convertToChatMessages(messages, true);
+
+    expect(result).toEqual([
+      {role: 'user', content: 'a follow-up question'},
+      {role: 'assistant', content: 'Conversation compacted...summary text'},
+    ] as ChatMessage[]);
+  });
 });
 
 // ---------- AssistantTurn coverage ----------
