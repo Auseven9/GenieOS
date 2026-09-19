@@ -41,6 +41,7 @@ import type {ToolDefinition} from '../services/talents/types';
 import memorySettingsRepository from '../repositories/MemorySettingsRepository';
 import {buildMemoryDigest} from '../services/memory/MemoryDigestBuilder';
 import {maybeRunMemoryExtraction} from '../services/memory/runMemoryExtraction';
+import {maybeCompactSession} from '../services/chat/ChatCompactionService';
 import {
   agentStateReducer,
   createTriggerMarkerCache,
@@ -507,6 +508,12 @@ async function applyEventToStore(
           '[useChatSession] memory extraction failed:',
           extractionErr,
         );
+      });
+      // Fire-and-forget, same as memory extraction above: a no-op unless
+      // auto-compaction is enabled, and it separately guards against
+      // running while the engine is still busy with this very turn.
+      maybeCompactSession(ctx.sessionId).catch(compactionErr => {
+        console.warn('[useChatSession] chat compaction failed:', compactionErr);
       });
       return;
     }

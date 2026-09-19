@@ -58,6 +58,7 @@ import {
   searchProviderStore,
 } from '../../store';
 import {MemorySettingsSection} from './MemorySettingsSection';
+import {ChatCompactionSection} from './ChatCompactionSection';
 import {PermissionsInfoSection} from './PermissionsInfoSection';
 import type {SearchProviderId} from '../../services/search/types';
 
@@ -1379,6 +1380,8 @@ export const SettingsScreen: React.FC = observer(() => {
           </Card>
 
           <MemorySettingsSection />
+
+          <ChatCompactionSection />
 
           <PermissionsInfoSection />
 

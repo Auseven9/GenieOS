@@ -63,6 +63,7 @@ import {mockTTSStore} from '../__mocks__/stores/ttsStore';
 import {checkoutFlowStore as mockCheckoutFlowStore} from '../__mocks__/stores/checkoutFlowStore';
 import {mockSearchProviderStore} from '../__mocks__/stores/searchProviderStore';
 import {memorySettingsStore as mockMemorySettingsStore} from '../__mocks__/stores/memorySettingsStore';
+import {chatCompactionStore as mockChatCompactionStore} from '../__mocks__/stores/chatCompactionStore';
 
 jest.mock('@react-native-clipboard/clipboard', () => mockClipboard);
 
@@ -123,6 +124,7 @@ jest.mock('../src/store', () => {
     checkoutFlowStore: mockCheckoutFlowStore,
     searchProviderStore: mockSearchProviderStore,
     memorySettingsStore: mockMemorySettingsStore,
+    chatCompactionStore: mockChatCompactionStore,
     defaultCompletionSettings: mockDefaultCompletionSettings,
   };
 });
