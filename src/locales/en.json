@@ -889,14 +889,18 @@
         "calculate": "Math expressions",
         "datetime": "Date & time",
         "web_search": "Web search",
-        "read_url": "Read web page"
+        "read_url": "Read web page",
+        "get_weather": "Weather",
+        "get_crypto_price": "Crypto prices"
       },
       "talentDescriptions": {
         "render_html": "Render HTML documents inline in chat",
         "calculate": "Evaluate mathematical expressions",
         "datetime": "Get the current date and time",
         "web_search": "Search the internet for current information (requires API key in Settings)",
-        "read_url": "Read the full content of a web page (requires API key in Settings)"
+        "read_url": "Read the full content of a web page (requires API key in Settings)",
+        "get_weather": "Get current weather conditions for a location (requires accepting the Internet Search disclosure in Settings, no API key needed)",
+        "get_crypto_price": "Get the current price of a cryptocurrency (requires accepting the Internet Search disclosure in Settings, no API key needed)"
       },
       "greeting": {
         "sectionLabel": "Greeting",
