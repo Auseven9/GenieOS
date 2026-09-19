@@ -2,6 +2,7 @@
 // controllable one, same pattern as ChatSessionRepository.pinned.test.ts.
 const mockCreate = jest.fn();
 const mockFetch = jest.fn();
+const mockFind = jest.fn();
 const mockWrite = jest.fn((callback: () => Promise<any>) => callback());
 
 jest.mock('../../database', () => ({
@@ -11,6 +12,7 @@ jest.mock('../../database', () => ({
       get: () => ({
         create: (mutator: (record: any) => void) => mockCreate(mutator),
         query: () => ({fetch: () => mockFetch()}),
+        find: (id: string) => mockFind(id),
       }),
     },
   },
@@ -118,5 +120,48 @@ describe('MemoryRepository.searchByText', () => {
     expect(results[0].similarity).toBeCloseTo(1);
     expect(results[1].id).toBe('mem-far');
     expect(results[1].similarity).toBeCloseTo(0);
+  });
+});
+
+describe('MemoryRepository.supersedeMemoryWithEmbedding', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockWrite.mockImplementation((callback: () => Promise<any>) => callback());
+  });
+
+  it('embeds the replacement content and retires the old memory in its favor', async () => {
+    const vector = new Float32Array([0.2, 0.4]);
+    mockEmbed.mockResolvedValue(vector);
+    mockCreate.mockImplementation((mutator: (record: any) => void) => {
+      const record = makeRecord({id: 'mem-2'});
+      mutator(record);
+      return record;
+    });
+
+    const previous = makeRecord({id: 'mem-1'});
+    previous.update = async (mutator: (record: any) => void) => {
+      mutator(previous);
+    };
+    mockFind.mockResolvedValue(previous);
+
+    const result = await memoryRepository.supersedeMemoryWithEmbedding(
+      '/models/bge-small.gguf',
+      'mem-1',
+      {
+        kind: 'fact',
+        content: 'user now prefers light mode',
+        provenance: 'user_stated',
+        tags: [],
+      },
+    );
+
+    expect(mockEmbed).toHaveBeenCalledWith(
+      '/models/bge-small.gguf',
+      'user now prefers light mode',
+    );
+    expect(result?.embedding).toBe(Memory.encodeEmbedding(vector));
+    expect(mockFind).toHaveBeenCalledWith('mem-1');
+    expect(previous.status).toBe('retired');
+    expect(previous.supersededBy).toBe('mem-2');
   });
 });

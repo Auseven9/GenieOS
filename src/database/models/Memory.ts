@@ -1,5 +1,6 @@
 import {Model} from '@nozbe/watermelondb';
 import {field, readonly, date} from '@nozbe/watermelondb/decorators';
+import {encodeBase64, decodeBase64} from '../../utils/base64';
 import type {
   Memory as MemoryView,
   MemoryKind,
@@ -41,14 +42,12 @@ export default class Memory extends Model {
       return undefined;
     }
     try {
-      const binary = globalThis.atob
-        ? globalThis.atob(this.embedding)
-        : Buffer.from(this.embedding, 'base64').toString('binary');
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-      return new Float32Array(bytes.buffer);
+      const bytes = decodeBase64(this.embedding);
+      return new Float32Array(
+        bytes.buffer,
+        bytes.byteOffset,
+        bytes.byteLength / 4,
+      );
     } catch {
       return undefined;
     }
@@ -80,14 +79,12 @@ export default class Memory extends Model {
 
   /** Encodes a float vector for storage in the `embedding` text column. */
   static encodeEmbedding(vector: Float32Array): string {
-    const bytes = new Uint8Array(vector.buffer);
-    let binary = '';
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return globalThis.btoa
-      ? globalThis.btoa(binary)
-      : Buffer.from(binary, 'binary').toString('base64');
+    const bytes = new Uint8Array(
+      vector.buffer,
+      vector.byteOffset,
+      vector.byteLength,
+    );
+    return encodeBase64(bytes);
   }
 
   static safeStringifyArray(value: string[]): string {

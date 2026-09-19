@@ -106,6 +106,19 @@ class MemoryRepository {
     }
   }
 
+  private async retireInFavorOf(
+    id: string,
+    replacementId: string,
+  ): Promise<void> {
+    const previous = await this.collection().find(id);
+    await database.write(async () => {
+      await previous.update((record: Memory) => {
+        record.supersededBy = replacementId;
+        record.status = 'retired';
+      });
+    });
+  }
+
   /**
    * Never overwrites in place: writes a new memory carrying the edit, marks
    * the old one `superseded_by` the new id and retires it. This is what
@@ -117,17 +130,38 @@ class MemoryRepository {
     next: MemoryInput,
   ): Promise<MemoryView | null> {
     try {
-      const previous = await this.collection().find(id);
       const replacement = await this.createMemory(next);
-      await database.write(async () => {
-        await previous.update((record: Memory) => {
-          record.supersededBy = replacement.id;
-          record.status = 'retired';
-        });
-      });
+      await this.retireInFavorOf(id, replacement.id);
       return replacement;
     } catch (error) {
       console.error('MemoryRepository: error superseding memory:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Same as `supersedeMemory`, but for the common case where the content
+   * actually changed: re-embeds `next.content` so the replacement is
+   * searchable under its new meaning rather than carrying the old memory's
+   * (now-superseded) vector forward, or none at all.
+   */
+  async supersedeMemoryWithEmbedding(
+    embeddingModelPath: string,
+    id: string,
+    next: MemoryInput,
+  ): Promise<MemoryView | null> {
+    try {
+      const replacement = await this.createMemoryWithEmbedding(
+        embeddingModelPath,
+        next,
+      );
+      await this.retireInFavorOf(id, replacement.id);
+      return replacement;
+    } catch (error) {
+      console.error(
+        'MemoryRepository: error superseding memory with embedding:',
+        error,
+      );
       return null;
     }
   }
