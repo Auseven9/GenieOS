@@ -12,6 +12,9 @@ import {
   SyncStatus,
   LocalPal,
   Memory,
+  MemoryNode,
+  MemoryEdge,
+  MemoryCompartment,
 } from './models';
 
 const adapter = new SQLiteAdapter({
@@ -36,6 +39,9 @@ export const database = new Database({
     SyncStatus,
     LocalPal,
     Memory,
+    MemoryNode,
+    MemoryEdge,
+    MemoryCompartment,
   ],
 });
 
@@ -49,4 +55,7 @@ export {
   SyncStatus,
   LocalPal,
   Memory,
+  MemoryNode,
+  MemoryEdge,
+  MemoryCompartment,
 };

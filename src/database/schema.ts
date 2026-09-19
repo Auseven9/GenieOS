@@ -1,7 +1,7 @@
 import {appSchema, tableSchema} from '@nozbe/watermelondb';
 
 export default appSchema({
-  version: 9,
+  version: 10,
   tables: [
     tableSchema({
       name: 'chat_sessions',
@@ -151,6 +151,63 @@ export default appSchema({
         {name: 'status', type: 'string', isIndexed: true}, // 'active' | 'retired'
         {name: 'last_accessed_at', type: 'number', isOptional: true},
         {name: 'access_count', type: 'number'},
+        {name: 'created_at', type: 'number'},
+        {name: 'updated_at', type: 'number'},
+      ],
+    }),
+    // Associative memory graph: canonical entity/topic nodes and the typed
+    // relations Gemma's extraction pass draws between them, scoped by
+    // compartment. See src/types/memoryGraph.ts for field semantics.
+    tableSchema({
+      name: 'memory_compartments',
+      columns: [
+        {name: 'name', type: 'string', isIndexed: true},
+        {name: 'description', type: 'string', isOptional: true},
+        {name: 'created_at', type: 'number'},
+        {name: 'updated_at', type: 'number'},
+      ],
+    }),
+    tableSchema({
+      name: 'memory_nodes',
+      columns: [
+        {name: 'label', type: 'string', isIndexed: true},
+        {name: 'kind', type: 'string', isIndexed: true},
+        {name: 'description', type: 'string', isOptional: true},
+        {name: 'embedding', type: 'string', isOptional: true}, // base64 Float32Array
+        {name: 'confidence', type: 'number'},
+        {name: 'valence', type: 'number', isOptional: true},
+        {name: 'intensity', type: 'number', isOptional: true},
+        {
+          name: 'compartment_id',
+          type: 'string',
+          isOptional: true,
+          isIndexed: true,
+        },
+        {name: 'provenance', type: 'string', isIndexed: true},
+        {name: 'source_memory_id', type: 'string', isOptional: true},
+        {name: 'pinned', type: 'boolean'},
+        {name: 'status', type: 'string', isIndexed: true}, // 'active' | 'retired'
+        {name: 'last_accessed_at', type: 'number', isOptional: true},
+        {name: 'access_count', type: 'number'},
+        {name: 'created_at', type: 'number'},
+        {name: 'updated_at', type: 'number'},
+      ],
+    }),
+    tableSchema({
+      name: 'memory_edges',
+      columns: [
+        {name: 'source_node_id', type: 'string', isIndexed: true},
+        {name: 'target_node_id', type: 'string', isIndexed: true},
+        {name: 'relation', type: 'string', isIndexed: true}, // SUPPORTS | CONTRADICTS | MENTIONS | ...
+        {name: 'weight', type: 'number'},
+        {name: 'confidence', type: 'number'},
+        {name: 'provenance', type: 'string', isIndexed: true},
+        {
+          name: 'source_conversation_id',
+          type: 'string',
+          isOptional: true,
+        },
+        {name: 'status', type: 'string', isIndexed: true}, // 'active' | 'retired'
         {name: 'created_at', type: 'number'},
         {name: 'updated_at', type: 'number'},
       ],

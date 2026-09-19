@@ -1,0 +1,120 @@
+/**
+ * The associative layer on top of the flat `memories` store: canonical
+ * nodes (entities/topics/preferences the model has recognized) connected by
+ * typed, directed edges. `memories` rows remain the raw extracted
+ * statements; a node is the deduped concept those statements refer to, and
+ * an edge is a relationship Gemma's extraction pass draws between two such
+ * concepts (e.g. "user likes dark mode" SUPPORTS "user is a night owl").
+ */
+
+import type {MemoryProvenance, MemoryStatus} from './memory';
+
+export type MemoryNodeKind =
+  | 'person'
+  | 'entity'
+  | 'topic'
+  | 'preference'
+  | 'event'
+  | 'place'
+  | 'concept'
+  | 'open_thread';
+
+export type MemoryEdgeRelation =
+  | 'SUPPORTS'
+  | 'CONTRADICTS'
+  | 'MENTIONS'
+  | 'RELATES_TO'
+  | 'CAUSES'
+  | 'PART_OF'
+  | 'PRECEDES';
+
+export interface MemoryNode {
+  id: string;
+  /** Canonical short name used for dedup lookups, e.g. "dark mode preference". */
+  label: string;
+  kind: MemoryNodeKind;
+  description?: string;
+  /** Base64-encoded Float32Array, absent until the embedding model has run. */
+  embedding?: string;
+  /** 0-1: how sure we are this node is durable/true. */
+  confidence: number;
+  /** -1 (distressing) to 1 (joyful); absent if not scored. */
+  valence?: number;
+  /** 0-1: how emotionally charged, independent of direction. */
+  intensity?: number;
+  /** Scoping container (e.g. per-Pal or per-topic isolation); absent = global. */
+  compartmentId?: string;
+  provenance: MemoryProvenance;
+  /** The `memories` row this node was first extracted from, if any. */
+  sourceMemoryId?: string;
+  pinned: boolean;
+  status: MemoryStatus;
+  lastAccessedAt?: string;
+  accessCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type MemoryNodeInput = Omit<
+  MemoryNode,
+  | 'id'
+  | 'status'
+  | 'accessCount'
+  | 'lastAccessedAt'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'confidence'
+  | 'pinned'
+> &
+  Partial<Pick<MemoryNode, 'confidence' | 'pinned'>>;
+
+export interface MemoryNodeFilter {
+  kind?: MemoryNodeKind;
+  compartmentId?: string;
+  status?: MemoryStatus;
+  pinnedOnly?: boolean;
+}
+
+export interface MemoryEdge {
+  id: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  relation: MemoryEdgeRelation;
+  /** 0-1: semantic strength of the relation, independent of confidence. */
+  weight: number;
+  /** 0-1: how sure we are this relation actually holds. */
+  confidence: number;
+  provenance: MemoryProvenance;
+  sourceConversationId?: string;
+  status: MemoryStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type MemoryEdgeInput = Omit<
+  MemoryEdge,
+  'id' | 'status' | 'createdAt' | 'updatedAt' | 'weight' | 'confidence'
+> &
+  Partial<Pick<MemoryEdge, 'weight' | 'confidence'>>;
+
+export type MemoryEdgeDirection = 'outgoing' | 'incoming' | 'both';
+
+export interface MemoryEdgeFilter {
+  nodeId?: string;
+  direction?: MemoryEdgeDirection;
+  relation?: MemoryEdgeRelation;
+  status?: MemoryStatus;
+}
+
+export interface MemoryCompartment {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type MemoryCompartmentInput = Omit<
+  MemoryCompartment,
+  'id' | 'createdAt' | 'updatedAt'
+>;
