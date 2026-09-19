@@ -3,6 +3,7 @@ import {createExtractionCompletionFn} from './extractionModel';
 import {extractJsonObject} from './extractJson';
 import {screenNode} from './MemoryWriteGatekeeper';
 import {maybeConsolidateLabel} from './MemoryConsolidationPipeline';
+import {logMemoryActivity} from './MemoryActivityLog';
 import type {MemoryNodeKind} from '../../types/memoryGraph';
 
 /**
@@ -81,10 +82,22 @@ async function runQuarantineCleanup() {
       status: 'quarantined',
     });
     const cutoff = Date.now() - QUARANTINE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    let removedCount = 0;
     for (const node of quarantined) {
       if (new Date(node.createdAt).getTime() < cutoff) {
         await memoryGraphRepository.hardDeleteNode(node.id);
+        removedCount++;
       }
+    }
+    // One aggregate line rather than one per node — a cleanup pass can
+    // remove dozens at once and per-node entries would just be noise in
+    // the activity feed.
+    if (removedCount > 0) {
+      await logMemoryActivity(
+        `Removed ${removedCount} stale quarantined ${
+          removedCount === 1 ? 'memory' : 'memories'
+        }`,
+      );
     }
   } catch (error) {
     console.error('MemorySweepPipeline: quarantine cleanup failed:', error);

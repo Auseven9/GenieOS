@@ -21,6 +21,7 @@ import type {
   MemoryCompartmentInput,
 } from '../types/memoryGraph';
 import type {MemoryStatus} from '../types/memory';
+import {logMemoryActivity} from '../services/memory/MemoryActivityLog';
 
 // Reinforcement bump applied to an existing edge's weight each time
 // extraction re-derives the same (source, target, relation) triple, rather
@@ -85,6 +86,12 @@ class MemoryGraphRepository {
           record.accessCount = 0;
         });
       });
+      // Only a trusted (active) node counts as "remembered" for the
+      // activity feed — a quarantined one failed the write gatekeeper's
+      // confidence threshold and isn't surfaced anywhere else either.
+      if (initialStatus === 'active') {
+        await logMemoryActivity(`Remembered: ${input.label}`);
+      }
       return created.toView();
     } catch (error) {
       console.error('MemoryGraphRepository: error creating node:', error);
@@ -230,6 +237,7 @@ class MemoryGraphRepository {
             r.extractedBy = input.extractedBy ?? existing.extractedBy;
           });
         });
+        await logMemoryActivity(`Updated: ${input.label}`);
         return existing.toView();
       }
     } catch (error) {
@@ -570,6 +578,9 @@ class MemoryGraphRepository {
         confidence: winner.confidence,
         provenance: 'model_inferred',
       });
+      await logMemoryActivity(
+        `Resolved conflict: "${winner.label}" superseded "${loser.label}"`,
+      );
 
       return {winnerId: winner.id, loserId: loser.id};
     } catch (error) {

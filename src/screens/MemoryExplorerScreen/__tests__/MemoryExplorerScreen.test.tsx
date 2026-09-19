@@ -1,6 +1,7 @@
 import React from 'react';
-import {of} from 'rxjs';
-import {fireEvent, waitFor} from '@testing-library/react-native';
+import {Alert} from 'react-native';
+import {of, Subject} from 'rxjs';
+import {act, fireEvent, waitFor} from '@testing-library/react-native';
 
 import {render} from '../../../../jest/test-utils';
 import {MemoryExplorerScreen} from '../MemoryExplorerScreen';
@@ -17,6 +18,14 @@ jest.mock('../../../repositories/MemoryGraphRepository', () => ({
     observeEdges: (...args: any[]) => mockObserveEdges(...args),
     listCompartments: (...args: any[]) => mockListCompartments(...args),
   },
+}));
+
+const mockGetMemoryActivityLog = jest.fn();
+const mockClearMemoryActivityLog = jest.fn();
+jest.mock('../../../services/memory/MemoryActivityLog', () => ({
+  getMemoryActivityLog: (...args: any[]) => mockGetMemoryActivityLog(...args),
+  clearMemoryActivityLog: (...args: any[]) =>
+    mockClearMemoryActivityLog(...args),
 }));
 
 function makeNode(overrides: Partial<MemoryNode> = {}): MemoryNode {
@@ -42,6 +51,8 @@ describe('MemoryExplorerScreen', () => {
     mockObserveNodes.mockReturnValue(of([]));
     mockObserveEdges.mockReturnValue(of([]));
     mockListCompartments.mockResolvedValue([]);
+    mockGetMemoryActivityLog.mockResolvedValue([]);
+    mockClearMemoryActivityLog.mockResolvedValue(undefined);
   });
 
   it('shows the empty state when there are no memories', () => {
@@ -105,5 +116,74 @@ describe('MemoryExplorerScreen', () => {
 
     expect(unsubscribeNodes).toHaveBeenCalledTimes(1);
     expect(unsubscribeEdges).toHaveBeenCalledTimes(1);
+  });
+
+  describe('activity feed', () => {
+    it('shows the empty message when nothing has been logged', async () => {
+      const {getByTestId, getByText} = render(<MemoryExplorerScreen />);
+
+      fireEvent.press(getByTestId('memory-explorer-activity-feed-button'));
+
+      await waitFor(() => {
+        expect(getByText('No memory activity recorded yet.')).toBeTruthy();
+      });
+    });
+
+    it('shows logged entries newest first', async () => {
+      mockGetMemoryActivityLog.mockResolvedValue([
+        {ts: 1, message: 'Remembered: cats'},
+        {ts: 2, message: 'Remembered: dogs'},
+      ]);
+      const {getByTestId, getByText} = render(<MemoryExplorerScreen />);
+
+      fireEvent.press(getByTestId('memory-explorer-activity-feed-button'));
+
+      await waitFor(() => {
+        expect(getByText(/Remembered: dogs/)).toBeTruthy();
+        expect(getByText(/Remembered: cats/)).toBeTruthy();
+      });
+    });
+
+    it('re-fetches the activity log each time the live node observable emits a new value', async () => {
+      const subject = new Subject<MemoryNode[]>();
+      mockObserveNodes.mockReturnValue(subject.asObservable());
+      mockGetMemoryActivityLog.mockResolvedValue([]);
+      render(<MemoryExplorerScreen />);
+
+      act(() => {
+        subject.next([]);
+      });
+      await waitFor(() => {
+        expect(mockGetMemoryActivityLog.mock.calls.length).toBeGreaterThan(1);
+      });
+    });
+
+    it('clears the log after confirming, then refreshes', async () => {
+      mockGetMemoryActivityLog.mockResolvedValue([
+        {ts: 1, message: 'Remembered: cats'},
+      ]);
+      mockClearMemoryActivityLog.mockImplementation(async () => {
+        mockGetMemoryActivityLog.mockResolvedValue([]);
+      });
+      const alertSpy = jest
+        .spyOn(Alert, 'alert')
+        .mockImplementation((_title, _message, buttons) => {
+          const confirm = buttons?.find(b => b.style === 'destructive');
+          confirm?.onPress?.();
+        });
+      const {getByTestId, getByText} = render(<MemoryExplorerScreen />);
+
+      fireEvent.press(getByTestId('memory-explorer-activity-feed-button'));
+      await waitFor(() => {
+        expect(getByText(/Remembered: cats/)).toBeTruthy();
+      });
+
+      fireEvent.press(getByTestId('memory-explorer-activity-clear-button'));
+
+      await waitFor(() => {
+        expect(mockClearMemoryActivityLog).toHaveBeenCalledTimes(1);
+      });
+      alertSpy.mockRestore();
+    });
   });
 });

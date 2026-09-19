@@ -14,6 +14,22 @@ import {
 import {useChatSession} from '../useChatSession';
 import {isReadUrlAllowed} from '../../services/talents';
 
+const mockIsMemoryEnabled = jest.fn().mockResolvedValue(false);
+const mockGetEmbeddingModelPath = jest.fn().mockResolvedValue(undefined);
+jest.mock('../../repositories/MemorySettingsRepository', () => ({
+  __esModule: true,
+  default: {
+    isMemoryEnabled: (...args: any[]) => mockIsMemoryEnabled(...args),
+    getEmbeddingModelPath: (...args: any[]) =>
+      mockGetEmbeddingModelPath(...args),
+  },
+}));
+
+const mockBuildMemoryDigest = jest.fn().mockResolvedValue(null);
+jest.mock('../../services/memory/MemoryDigestBuilder', () => ({
+  buildMemoryDigest: (...args: any[]) => mockBuildMemoryDigest(...args),
+}));
+
 import {
   chatSessionStore,
   modelStore,
@@ -955,6 +971,69 @@ describe('useChatSession', () => {
 
       expect(ttsStore.onAssistantMessageStart).not.toHaveBeenCalled();
       expect(ttsStore.onAssistantMessageChunk).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('memory recall UI signal', () => {
+    afterEach(() => {
+      mockIsMemoryEnabled.mockResolvedValue(false);
+      mockBuildMemoryDigest.mockResolvedValue(null);
+    });
+
+    it('clears any stale recall before a new turn, then sets it from the digest', async () => {
+      mockIsMemoryEnabled.mockResolvedValue(true);
+      mockGetEmbeddingModelPath.mockResolvedValue('/models/bge-small.gguf');
+      mockBuildMemoryDigest.mockResolvedValue({
+        text: 'Relevant memories...',
+        includedCount: 2,
+        includedSnippets: ['likes cats', 'works remotely'],
+      });
+
+      const {result} = renderHook(() =>
+        useChatSession({current: null}, textMessage.author, mockAssistant),
+      );
+
+      await act(async () => {
+        await result.current.handleSendPress(textMessage);
+      });
+
+      expect(uiStore.clearMemoryRecall).toHaveBeenCalled();
+      expect(uiStore.setMemoryRecall).toHaveBeenCalledWith({
+        count: 2,
+        snippets: ['likes cats', 'works remotely'],
+      });
+    });
+
+    it('does not set a recall when the digest has nothing to add', async () => {
+      mockIsMemoryEnabled.mockResolvedValue(true);
+      mockGetEmbeddingModelPath.mockResolvedValue('/models/bge-small.gguf');
+      mockBuildMemoryDigest.mockResolvedValue(null);
+
+      const {result} = renderHook(() =>
+        useChatSession({current: null}, textMessage.author, mockAssistant),
+      );
+
+      await act(async () => {
+        await result.current.handleSendPress(textMessage);
+      });
+
+      expect(uiStore.clearMemoryRecall).toHaveBeenCalled();
+      expect(uiStore.setMemoryRecall).not.toHaveBeenCalled();
+    });
+
+    it('does not call buildMemoryDigest when memory is disabled', async () => {
+      mockIsMemoryEnabled.mockResolvedValue(false);
+
+      const {result} = renderHook(() =>
+        useChatSession({current: null}, textMessage.author, mockAssistant),
+      );
+
+      await act(async () => {
+        await result.current.handleSendPress(textMessage);
+      });
+
+      expect(mockBuildMemoryDigest).not.toHaveBeenCalled();
+      expect(uiStore.setMemoryRecall).not.toHaveBeenCalled();
     });
   });
 });

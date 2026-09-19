@@ -59,6 +59,11 @@ jest.mock('../../services/memory/EmbeddingEngine', () => ({
   default: {embed: (...args: any[]) => mockEmbed(...args)},
 }));
 
+const mockLogMemoryActivity = jest.fn();
+jest.mock('../../services/memory/MemoryActivityLog', () => ({
+  logMemoryActivity: (...args: any[]) => mockLogMemoryActivity(...args),
+}));
+
 import {of, Subject} from 'rxjs';
 import memoryGraphRepository, {
   EDGE_REINFORCEMENT_STEP,
@@ -158,6 +163,34 @@ describe('MemoryGraphRepository.findOrCreateNode', () => {
 
     expect(result.label).toBe('dark mode preference');
     expect(mockNodeCreate).toHaveBeenCalledTimes(1);
+    expect(mockLogMemoryActivity).toHaveBeenCalledWith(
+      'Remembered: dark mode preference',
+    );
+  });
+
+  it('does not log activity for a node created quarantined', async () => {
+    mockNodeFetch.mockResolvedValue([]);
+    mockNodeCreate.mockImplementation((mutator: (record: any) => void) => {
+      const record = makeNodeRecord({
+        label: 'shaky claim',
+        status: 'quarantined',
+      });
+      mutator(record);
+      return record;
+    });
+
+    await memoryGraphRepository.findOrCreateNode(
+      {
+        label: 'shaky claim',
+        kind: 'topic',
+        memoryType: 'semantic',
+        provenance: 'user_stated',
+      },
+      undefined,
+      'quarantined',
+    );
+
+    expect(mockLogMemoryActivity).not.toHaveBeenCalled();
   });
 
   it('embeds the node when an embedding model path is given and none matches', async () => {
@@ -270,6 +303,7 @@ describe('MemoryGraphRepository.upsertSemanticNode', () => {
 
     expect(result.label).toBe('cats');
     expect(mockNodeCreate).toHaveBeenCalledTimes(1);
+    expect(mockLogMemoryActivity).toHaveBeenCalledWith('Remembered: cats');
   });
 
   it('updates an existing matching semantic node in place rather than leaving it untouched', async () => {
@@ -295,6 +329,7 @@ describe('MemoryGraphRepository.upsertSemanticNode', () => {
     expect(existing.description).toBe('fresh consolidated summary');
     expect(existing.confidence).toBe(0.9);
     expect(result.description).toBe('fresh consolidated summary');
+    expect(mockLogMemoryActivity).toHaveBeenCalledWith('Updated: cats');
   });
 
   it('re-embeds the updated node when an embedding model path is given', async () => {
@@ -450,6 +485,9 @@ describe('MemoryGraphRepository.resolveContradiction', () => {
     expect(result).toEqual({winnerId: 'node-winner', loserId: 'node-loser'});
     expect(loser.status).toBe('retired');
     expect(mockEdgeCreate).toHaveBeenCalledTimes(1);
+    expect(mockLogMemoryActivity).toHaveBeenCalledWith(
+      expect.stringContaining('superseded'),
+    );
   });
 
   it('breaks a confidence tie in favor of the more recently created node', async () => {

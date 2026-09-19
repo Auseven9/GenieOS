@@ -19,6 +19,11 @@ jest.mock('../extractionModel', () => ({
     mockCreateExtractionCompletionFn(...args),
 }));
 
+const mockLogMemoryActivity = jest.fn();
+jest.mock('../MemoryActivityLog', () => ({
+  logMemoryActivity: (...args: any[]) => mockLogMemoryActivity(...args),
+}));
+
 import {
   maybeConsolidateLabel,
   CONSOLIDATION_EPISODIC_THRESHOLD,
@@ -111,6 +116,9 @@ describe('maybeConsolidateLabel', () => {
       }),
     );
     expect(mockSoftDeleteNode).toHaveBeenCalledTimes(nodes.length);
+    expect(mockLogMemoryActivity).toHaveBeenCalledWith(
+      `Consolidated ${nodes.length} mentions of "cats" into one belief`,
+    );
   });
 
   it('does not consolidate when the completion fails', async () => {

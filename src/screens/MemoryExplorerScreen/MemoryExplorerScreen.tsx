@@ -1,5 +1,11 @@
-import React, {useContext, useEffect, useMemo, useState} from 'react';
-import {View, useWindowDimensions} from 'react-native';
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+import {Alert, ScrollView, View, useWindowDimensions} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {Gesture, GestureDetector} from 'react-native-gesture-handler';
 import Animated, {
@@ -7,7 +13,8 @@ import Animated, {
   useSharedValue,
 } from 'react-native-reanimated';
 import Svg, {Circle, Line} from 'react-native-svg';
-import {Text, TextInput} from 'react-native-paper';
+import {Button, IconButton, Text, TextInput} from 'react-native-paper';
+import Clipboard from '@react-native-clipboard/clipboard';
 
 import {Sheet} from '../../components';
 import {L10nContext} from '../../utils';
@@ -28,6 +35,11 @@ import {
   confidenceToOpacity,
   SEARCH_DIM_MULTIPLIER,
 } from '../../utils/memoryNodeVisuals';
+import {
+  getMemoryActivityLog,
+  clearMemoryActivityLog,
+  type MemoryActivityEntry,
+} from '../../services/memory/MemoryActivityLog';
 import {createStyles} from './styles';
 
 // No pagination/limit exists anywhere in MemoryGraphRepository — observeNodes
@@ -81,6 +93,18 @@ export const MemoryExplorerScreen: React.FC = () => {
     undefined,
   );
   const [query, setQuery] = useState('');
+  const [isActivityFeedVisible, setIsActivityFeedVisible] = useState(false);
+  const [activityEntries, setActivityEntries] = useState<MemoryActivityEntry[]>(
+    [],
+  );
+
+  const refreshActivityLog = useCallback(() => {
+    getMemoryActivityLog()
+      .then(setActivityEntries)
+      .catch(() => {
+        // getMemoryActivityLog already logs; nothing more to do here.
+      });
+  }, []);
 
   useEffect(() => {
     const nodesSub = memoryGraphRepository.observeNodes().subscribe({
@@ -97,11 +121,46 @@ export const MemoryExplorerScreen: React.FC = () => {
       .listCompartments()
       .then(setCompartments)
       .catch(() => {});
+    refreshActivityLog();
     return () => {
       nodesSub.unsubscribe();
       edgesSub.unsubscribe();
     };
-  }, []);
+  }, [refreshActivityLog]);
+
+  // Every write this screen's activity feed cares about (a node created,
+  // updated, retired, or superseded) also touches the live node/edge
+  // observables above, so re-reading the activity log whenever either
+  // fires keeps the feed live without polling or a second observable.
+  useEffect(() => {
+    refreshActivityLog();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allNodes, allEdges]);
+
+  const handleCopyActivityLog = () => {
+    const logText = activityEntries
+      .map(entry => `${new Date(entry.ts).toLocaleString()}  ${entry.message}`)
+      .join('\n');
+    Clipboard.setString(logText);
+    Alert.alert('', l10n.components.memoryExplorer.activityFeedCopiedMessage);
+  };
+
+  const handleClearActivityLog = () => {
+    Alert.alert(
+      l10n.components.memoryExplorer.activityFeedClearConfirmTitle,
+      l10n.components.memoryExplorer.activityFeedClearConfirmMessage,
+      [
+        {text: l10n.common.cancel, style: 'cancel'},
+        {
+          text: l10n.common.clear,
+          style: 'destructive',
+          onPress: () => {
+            clearMemoryActivityLog().then(refreshActivityLog);
+          },
+        },
+      ],
+    );
+  };
 
   const visibleNodes = useMemo(() => pickVisibleNodes(allNodes), [allNodes]);
   const visibleNodeIds = useMemo(
@@ -210,6 +269,13 @@ export const MemoryExplorerScreen: React.FC = () => {
           value={query}
           onChangeText={setQuery}
           style={styles.searchInput}
+        />
+        <IconButton
+          testID="memory-explorer-activity-feed-button"
+          icon="history"
+          mode="contained-tonal"
+          accessibilityLabel={l10n.components.memoryExplorer.activityFeedButton}
+          onPress={() => setIsActivityFeedVisible(true)}
         />
       </View>
 
@@ -338,6 +404,53 @@ export const MemoryExplorerScreen: React.FC = () => {
             )}
           </Sheet.View>
         )}
+      </Sheet>
+
+      <Sheet
+        isVisible={isActivityFeedVisible}
+        onClose={() => setIsActivityFeedVisible(false)}
+        title={l10n.components.memoryExplorer.activityFeedTitle}>
+        <Sheet.View style={styles.activityFeedContent}>
+          <ScrollView
+            testID="memory-explorer-activity-log-scroll"
+            style={styles.logScrollContainer}>
+            {activityEntries.length === 0 ? (
+              <Text variant="labelSmall" style={styles.logText}>
+                {l10n.components.memoryExplorer.activityFeedEmpty}
+              </Text>
+            ) : (
+              activityEntries
+                .slice()
+                .reverse()
+                .map((entry, index) => (
+                  <Text
+                    key={`${entry.ts}-${index}`}
+                    variant="labelSmall"
+                    style={styles.logText}>
+                    {`${new Date(entry.ts).toLocaleTimeString()}  ${
+                      entry.message
+                    }`}
+                  </Text>
+                ))
+            )}
+          </ScrollView>
+          <View style={styles.logButtonRow}>
+            <Button
+              testID="memory-explorer-activity-clear-button"
+              mode="text"
+              onPress={handleClearActivityLog}
+              disabled={activityEntries.length === 0}>
+              {l10n.common.clear}
+            </Button>
+            <Button
+              testID="memory-explorer-activity-copy-button"
+              mode="outlined"
+              onPress={handleCopyActivityLog}
+              disabled={activityEntries.length === 0}>
+              {l10n.components.memoryExplorer.activityFeedCopyButton}
+            </Button>
+          </View>
+        </Sheet.View>
       </Sheet>
     </SafeAreaView>
   );

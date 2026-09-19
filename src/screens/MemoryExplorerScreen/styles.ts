@@ -1,4 +1,4 @@
-import {StyleSheet} from 'react-native';
+import {Platform, StyleSheet} from 'react-native';
 
 import {Theme} from '../../utils/types';
 
@@ -11,8 +11,12 @@ export const createStyles = (theme: Theme) =>
     searchRow: {
       paddingHorizontal: 16,
       paddingTop: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
     },
     searchInput: {
+      flex: 1,
       backgroundColor: theme.colors.background,
     },
     legendRow: {
@@ -39,5 +43,30 @@ export const createStyles = (theme: Theme) =>
     },
     detailRow: {
       marginBottom: 8,
+    },
+    activityFeedContent: {
+      paddingHorizontal: 16,
+      paddingBottom: 24,
+    },
+    // Same bounded/scrollable/monospace treatment as the sweep diagnostics
+    // log in Settings — this is the same kind of append-only event feed,
+    // just for graph writes instead of scheduler runs.
+    logScrollContainer: {
+      maxHeight: 400,
+      marginBottom: 8,
+      borderRadius: 8,
+      backgroundColor: theme.colors.surfaceVariant,
+      padding: 8,
+    },
+    logText: {
+      fontFamily: Platform.select({ios: 'Menlo', default: 'monospace'}),
+      fontSize: 11,
+      color: theme.colors.onSurfaceVariant,
+      marginBottom: 4,
+    },
+    logButtonRow: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      gap: 8,
     },
   });

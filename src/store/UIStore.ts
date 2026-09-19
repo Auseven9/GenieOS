@@ -57,6 +57,12 @@ export class UIStore {
   // Warning state for chat-related warnings (like multimodal warnings)
   chatWarning: ErrorState | null = null;
 
+  // Ephemeral, per-turn: which long-term memories buildMemoryDigest just
+  // pulled into the current completion's context, for a brief "N memories
+  // recalled" chip. Never persisted — like chatWarning, this is a
+  // this-session-only UI signal, not durable state.
+  memoryRecall: {count: number; snippets: string[]} | null = null;
+
   // Models for which the tool-compatibility banner has already been shown.
   // Persisted so each model warns at most once per device.
   toolCompatWarnedModels: string[] = [];
@@ -105,6 +111,18 @@ export class UIStore {
   clearChatWarning() {
     runInAction(() => {
       this.chatWarning = null;
+    });
+  }
+
+  setMemoryRecall(recall: {count: number; snippets: string[]} | null) {
+    runInAction(() => {
+      this.memoryRecall = recall;
+    });
+  }
+
+  clearMemoryRecall() {
+    runInAction(() => {
+      this.memoryRecall = null;
     });
   }
 

@@ -3,6 +3,7 @@ import {createExtractionCompletionFn} from './extractionModel';
 import {extractJsonObject} from './extractJson';
 import {screenNode} from './MemoryWriteGatekeeper';
 import {clamp} from './validateMemoryInput';
+import {logMemoryActivity} from './MemoryActivityLog';
 import type {MemoryNodeKind} from '../../types/memoryGraph';
 
 /**
@@ -172,6 +173,10 @@ export async function maybeConsolidateLabel(
         extractedBy,
       },
       embeddingModelPath,
+    );
+
+    await logMemoryActivity(
+      `Consolidated ${matching.length} mentions of "${target.label}" into one belief`,
     );
 
     for (const episodic of matching) {

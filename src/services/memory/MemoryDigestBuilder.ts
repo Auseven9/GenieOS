@@ -27,6 +27,22 @@ export interface MemoryDigestOptions {
 const DEFAULT_MAX_MEMORIES = 8;
 const DEFAULT_MAX_CHARS = 2000;
 
+// How much of a memory's content to surface in includedSnippets — meant for
+// a brief "N memories recalled" chip in the chat UI, not for reading the
+// memory itself, so this stays short regardless of maxChars.
+const SNIPPET_MAX_CHARS = 60;
+
+export interface MemoryDigestResult {
+  /** The full system-prompt fragment, as before. */
+  text: string;
+  /** How many memories actually made it into `text`. */
+  includedCount: number;
+  /** Short previews of each included memory's content, in the same order
+   *  they appear in `text` — for a live "recalled" UI affordance, not for
+   *  reconstructing the digest itself. */
+  includedSnippets: string[];
+}
+
 // searchByText's raw similarity ranking is fetched over a wider pool than
 // what's actually shown, so decay-based re-ranking (below) can promote a
 // fresher, well-reinforced memory over a stale one that only wins on raw
@@ -68,7 +84,7 @@ function dedupeById(memories: Memory[]): Memory[] {
  */
 export async function buildMemoryDigest(
   options: MemoryDigestOptions,
-): Promise<string | null> {
+): Promise<MemoryDigestResult | null> {
   const {
     embeddingModelPath,
     queryText,
@@ -144,5 +160,13 @@ export async function buildMemoryDigest(
     memoryRepository.recordAccess(memory.id).catch(() => {});
   }
 
-  return [DIGEST_HEADER, ...lines].join('\n');
+  return {
+    text: [DIGEST_HEADER, ...lines].join('\n'),
+    includedCount: included.length,
+    includedSnippets: included.map(memory =>
+      memory.content.length > SNIPPET_MAX_CHARS
+        ? memory.content.slice(0, SNIPPET_MAX_CHARS - 1).trimEnd() + '…'
+        : memory.content,
+    ),
+  };
 }

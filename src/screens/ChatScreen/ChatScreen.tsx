@@ -7,6 +7,7 @@ import {
   Bubble,
   ChatView,
   ErrorSnackbar,
+  MemoryRecallSnackbar,
   ModelErrorReportSheet,
 } from '../../components';
 import {PalSheet} from '../../components/PalsSheets';
@@ -294,6 +295,10 @@ export const ChatScreen: React.FC = observer(() => {
           onDismiss={() => uiStore.clearChatWarning()}
         />
       )}
+      <MemoryRecallSnackbar
+        recall={uiStore.memoryRecall}
+        onDismiss={() => uiStore.clearMemoryRecall()}
+      />
       {modelStore.modelLoadError && (
         <ErrorSnackbar
           error={modelStore.modelLoadError}

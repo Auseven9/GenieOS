@@ -147,9 +147,8 @@ const prepareCompletion = async ({
   // settings lookups and buildMemoryDigest itself already swallow their own
   // errors and resolve to a safe "nothing to add" value (false/undefined/
   // null), but this still guards against something unexpected escaping
-  // that contract. Currently a no-op in every real session: there is no
-  // settings UI yet to turn memory on or configure an embedding model, so
-  // isMemoryEnabled() always resolves false until that lands.
+  // that contract.
+  uiStore.clearMemoryRecall();
   try {
     const memoryEnabled = await memorySettingsRepository.isMemoryEnabled();
     if (memoryEnabled) {
@@ -160,7 +159,11 @@ const prepareCompletion = async ({
         queryText: message.text,
       });
       if (memoryDigest) {
-        systemPromptFragments.push(memoryDigest);
+        systemPromptFragments.push(memoryDigest.text);
+        uiStore.setMemoryRecall({
+          count: memoryDigest.includedCount,
+          snippets: memoryDigest.includedSnippets,
+        });
       }
     }
   } catch (error) {

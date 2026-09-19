@@ -64,7 +64,9 @@ describe('buildMemoryDigest', () => {
       queryText: 'unrelated query',
     });
 
-    expect(result).toContain("mom's name is Linda");
+    expect(result?.text).toContain("mom's name is Linda");
+    expect(result?.includedCount).toBe(1);
+    expect(result?.includedSnippets).toEqual(["mom's name is Linda"]);
   });
 
   it('includes similarity-ranked matches', async () => {
@@ -77,7 +79,7 @@ describe('buildMemoryDigest', () => {
       queryText: 'what theme do I like?',
     });
 
-    expect(result).toContain('likes dark mode');
+    expect(result?.text).toContain('likes dark mode');
     // Fetches a wider candidate pool than maxMemories so decay-based
     // re-ranking (see decay.ts) has room to promote a fresher match over
     // one that only wins on raw similarity.
@@ -86,6 +88,20 @@ describe('buildMemoryDigest', () => {
       'what theme do I like?',
       24,
     );
+  });
+
+  it('truncates a long memory content into a short snippet', async () => {
+    mockListMemories.mockResolvedValue([
+      makeMemory({id: 'p1', content: 'x'.repeat(100), pinned: true}),
+    ]);
+
+    const result = await buildMemoryDigest({
+      embeddingModelPath: '/models/bge-small.gguf',
+      queryText: 'x',
+    });
+
+    expect(result?.includedSnippets[0].length).toBeLessThanOrEqual(60);
+    expect(result?.includedSnippets[0].endsWith('…')).toBe(true);
   });
 
   it('deduplicates a memory that is both pinned and a similarity match', async () => {
@@ -102,7 +118,8 @@ describe('buildMemoryDigest', () => {
       queryText: 'x',
     });
 
-    expect(result?.match(/shared memory/g)).toHaveLength(1);
+    expect(result?.text.match(/shared memory/g)).toHaveLength(1);
+    expect(result?.includedCount).toBe(1);
   });
 
   it('ranks a fresher, well-reinforced match above a stale one that only wins on raw similarity', async () => {
@@ -139,8 +156,8 @@ describe('buildMemoryDigest', () => {
       maxMemories: 1,
     });
 
-    expect(result).toContain('fresh match');
-    expect(result).not.toContain('stale match');
+    expect(result?.text).toContain('fresh match');
+    expect(result?.text).not.toContain('stale match');
   });
 
   it('marks each line with its literal provenance so the tag survives into the prompt text', async () => {
@@ -164,8 +181,8 @@ describe('buildMemoryDigest', () => {
       queryText: 'x',
     });
 
-    expect(result).toContain('[user_stated] a trusted fact');
-    expect(result).toContain('[external_content] an unverified claim');
+    expect(result?.text).toContain('[user_stated] a trusted fact');
+    expect(result?.text).toContain('[external_content] an unverified claim');
   });
 
   it('respects maxMemories', async () => {
@@ -181,9 +198,10 @@ describe('buildMemoryDigest', () => {
       maxMemories: 3,
     });
 
-    const lineCount = result?.split('\n').length ?? 0;
+    const lineCount = result?.text.split('\n').length ?? 0;
     // 1 header line + at most maxMemories content lines.
     expect(lineCount).toBeLessThanOrEqual(4);
+    expect(result?.includedCount).toBeLessThanOrEqual(3);
   });
 
   it('stops adding lines once the character budget is exhausted', async () => {
@@ -197,7 +215,7 @@ describe('buildMemoryDigest', () => {
       embeddingModelPath: '/models/bge-small.gguf',
       queryText: 'x',
     });
-    const budget = shortOnlyDigest!.length + 10;
+    const budget = shortOnlyDigest!.text.length + 10;
 
     mockListMemories.mockResolvedValue([
       makeMemory({id: 'short', content: 'short one', pinned: true}),
@@ -210,8 +228,9 @@ describe('buildMemoryDigest', () => {
       maxChars: budget,
     });
 
-    expect(result).toContain('short one');
-    expect(result).not.toContain('x'.repeat(500));
+    expect(result?.text).toContain('short one');
+    expect(result?.text).not.toContain('x'.repeat(500));
+    expect(result?.includedCount).toBe(1);
   });
 
   it('records access only for memories that actually made it into the digest text', async () => {
@@ -222,7 +241,7 @@ describe('buildMemoryDigest', () => {
       embeddingModelPath: '/models/bge-small.gguf',
       queryText: 'x',
     });
-    const budget = shortOnlyDigest!.length + 10;
+    const budget = shortOnlyDigest!.text.length + 10;
     mockRecordAccess.mockClear();
 
     mockListMemories.mockResolvedValue([

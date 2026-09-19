@@ -28,6 +28,11 @@ jest.mock('../MemoryConsolidationPipeline', () => ({
   maybeConsolidateLabel: (...args: any[]) => mockMaybeConsolidateLabel(...args),
 }));
 
+const mockLogMemoryActivity = jest.fn();
+jest.mock('../MemoryActivityLog', () => ({
+  logMemoryActivity: (...args: any[]) => mockLogMemoryActivity(...args),
+}));
+
 import {
   runMemorySweep,
   getWorldviewSummary,
@@ -138,6 +143,9 @@ describe('runMemorySweep', () => {
       await runMemorySweep();
 
       expect(mockHardDeleteNode).toHaveBeenCalledWith('old-quarantined');
+      expect(mockLogMemoryActivity).toHaveBeenCalledWith(
+        'Removed 1 stale quarantined memory',
+      );
     });
 
     it('leaves a recently quarantined node alone', async () => {
@@ -153,6 +161,40 @@ describe('runMemorySweep', () => {
       await runMemorySweep();
 
       expect(mockHardDeleteNode).not.toHaveBeenCalled();
+      expect(mockLogMemoryActivity).not.toHaveBeenCalledWith(
+        expect.stringContaining('stale quarantined'),
+      );
+    });
+
+    it('logs a single aggregate entry with the plural label when multiple nodes are removed', async () => {
+      const old1 = makeNode({
+        id: 'old-1',
+        status: 'quarantined',
+        createdAt: new Date(
+          Date.now() - 31 * 24 * 60 * 60 * 1000,
+        ).toISOString(),
+      });
+      const old2 = makeNode({
+        id: 'old-2',
+        status: 'quarantined',
+        createdAt: new Date(
+          Date.now() - 40 * 24 * 60 * 60 * 1000,
+        ).toISOString(),
+      });
+      mockListNodes.mockImplementation(async (filter: any) =>
+        filter.status === 'quarantined' ? [old1, old2] : [],
+      );
+
+      await runMemorySweep();
+
+      expect(mockLogMemoryActivity).toHaveBeenCalledWith(
+        'Removed 2 stale quarantined memories',
+      );
+      expect(
+        mockLogMemoryActivity.mock.calls.filter(call =>
+          call[0].includes('stale quarantined'),
+        ),
+      ).toHaveLength(1);
     });
   });
 

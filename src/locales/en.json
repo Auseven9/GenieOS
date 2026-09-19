@@ -618,7 +618,14 @@
       "detailProvenance": "Source",
       "detailCompartment": "Compartment",
       "detailPinned": "Pinned",
-      "detailUnscored": "not scored"
+      "detailUnscored": "not scored",
+      "activityFeedButton": "Activity",
+      "activityFeedTitle": "Memory activity",
+      "activityFeedEmpty": "No memory activity recorded yet.",
+      "activityFeedCopyButton": "Copy log",
+      "activityFeedCopiedMessage": "Log copied to clipboard.",
+      "activityFeedClearConfirmTitle": "Clear activity feed?",
+      "activityFeedClearConfirmMessage": "This removes the recorded activity history. This can't be undone."
     },
     "exportUtils": {
       "fileSaved": "File Saved",
@@ -1255,6 +1262,8 @@
     "readyToChat": "Ready to chat? Load the last used model.",
     "pleaseLoadModel": "Load a model to chat.",
     "multimodalNotEnabled": "Multimodal is not enabled for this model. Images will be displayed but not processed by the AI.",
+    "memoryRecalledOne": "1 memory recalled",
+    "memoryRecalledMany": "{{count}} memories recalled",
     "cannotSendWithoutModel": "Load a model first",
     "toolCompatWarning": "This model may not support tool calling. Results may be unreliable.",
     "softCapWarning": "Start a new chat for best performance.",
