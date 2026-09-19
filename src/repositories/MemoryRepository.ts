@@ -1,4 +1,5 @@
 import {Q} from '@nozbe/watermelondb';
+import type {Clause} from '@nozbe/watermelondb/QueryDescription';
 import {database} from '../database';
 import Memory from '../database/models/Memory';
 import type {
@@ -69,7 +70,7 @@ class MemoryRepository {
 
   async listMemories(filter: MemoryFilter = {}): Promise<MemoryView[]> {
     try {
-      const clauses = [];
+      const clauses: Clause[] = [];
       if (filter.kind) {
         clauses.push(Q.where('kind', filter.kind));
       }
@@ -87,7 +88,9 @@ class MemoryRepository {
         clauses.push(Q.where('pinned', true));
       }
 
-      const records = await this.collection().query(...clauses).fetch();
+      const records = await this.collection()
+        .query(...clauses)
+        .fetch();
       const views = records.map(record => record.toView());
 
       // Tag filtering happens in JS: tags are a JSON-stringified array, not

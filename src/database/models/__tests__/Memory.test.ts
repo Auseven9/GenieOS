@@ -34,7 +34,9 @@ function makeMemory(raw: Record<string, any> = {}): MemoryModel {
 
 describe('Memory.tagsArray', () => {
   it('parses stringified tags', () => {
-    const memory = makeMemory({tags: MemoryModel.safeStringifyArray(['mom', 'health'])});
+    const memory = makeMemory({
+      tags: MemoryModel.safeStringifyArray(['mom', 'health']),
+    });
     expect(memory.tagsArray).toEqual(['mom', 'health']);
   });
 
