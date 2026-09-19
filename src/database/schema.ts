@@ -1,7 +1,7 @@
 import {appSchema, tableSchema} from '@nozbe/watermelondb';
 
 export default appSchema({
-  version: 8,
+  version: 9,
   tables: [
     tableSchema({
       name: 'chat_sessions',
@@ -127,6 +127,30 @@ export default appSchema({
         {name: 'generation_settings', type: 'string', isOptional: true}, // JSON stringified
         {name: 'pact', type: 'string', isOptional: true}, // JSON stringified { talents: TalentRef[] }
         {name: 'greeting', type: 'string', isOptional: true}, // JSON stringified Pal['greeting']
+        {name: 'created_at', type: 'number'},
+        {name: 'updated_at', type: 'number'},
+      ],
+    }),
+    // Long-term memory: durable facts/preferences/events extracted from
+    // conversations, retrieved by relevance rather than replayed as raw
+    // transcript. See src/types/memory.ts for the field semantics.
+    tableSchema({
+      name: 'memories',
+      columns: [
+        {name: 'kind', type: 'string', isIndexed: true},
+        {name: 'content', type: 'string'},
+        {name: 'embedding', type: 'string', isOptional: true}, // base64 Float32Array
+        {name: 'confidence', type: 'number'},
+        {name: 'valence', type: 'number', isOptional: true},
+        {name: 'intensity', type: 'number', isOptional: true},
+        {name: 'provenance', type: 'string', isIndexed: true},
+        {name: 'source_conversation_id', type: 'string', isOptional: true},
+        {name: 'tags', type: 'string'}, // JSON stringified string[]
+        {name: 'pinned', type: 'boolean'},
+        {name: 'superseded_by', type: 'string', isOptional: true},
+        {name: 'status', type: 'string', isIndexed: true}, // 'active' | 'retired'
+        {name: 'last_accessed_at', type: 'number', isOptional: true},
+        {name: 'access_count', type: 'number'},
         {name: 'created_at', type: 'number'},
         {name: 'updated_at', type: 'number'},
       ],

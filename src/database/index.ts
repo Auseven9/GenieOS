@@ -11,6 +11,7 @@ import {
   UserLibrary,
   SyncStatus,
   LocalPal,
+  Memory,
 } from './models';
 
 const adapter = new SQLiteAdapter({
@@ -34,6 +35,7 @@ export const database = new Database({
     UserLibrary,
     SyncStatus,
     LocalPal,
+    Memory,
   ],
 });
 
@@ -46,4 +48,5 @@ export {
   UserLibrary,
   SyncStatus,
   LocalPal,
+  Memory,
 };

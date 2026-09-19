@@ -153,5 +153,36 @@ export default schemaMigrations({
         }),
       ],
     },
+    // Migration to version 9: Add memories table (long-term memory store)
+    {
+      toVersion: 9,
+      steps: [
+        createTable({
+          name: 'memories',
+          columns: [
+            {name: 'kind', type: 'string', isIndexed: true},
+            {name: 'content', type: 'string'},
+            {name: 'embedding', type: 'string', isOptional: true},
+            {name: 'confidence', type: 'number'},
+            {name: 'valence', type: 'number', isOptional: true},
+            {name: 'intensity', type: 'number', isOptional: true},
+            {name: 'provenance', type: 'string', isIndexed: true},
+            {
+              name: 'source_conversation_id',
+              type: 'string',
+              isOptional: true,
+            },
+            {name: 'tags', type: 'string'},
+            {name: 'pinned', type: 'boolean'},
+            {name: 'superseded_by', type: 'string', isOptional: true},
+            {name: 'status', type: 'string', isIndexed: true},
+            {name: 'last_accessed_at', type: 'number', isOptional: true},
+            {name: 'access_count', type: 'number'},
+            {name: 'created_at', type: 'number'},
+            {name: 'updated_at', type: 'number'},
+          ],
+        }),
+      ],
+    },
   ],
 });
