@@ -28,11 +28,22 @@ export type MemoryEdgeRelation =
   | 'PART_OF'
   | 'PRECEDES';
 
+/**
+ * Tulving's episodic/semantic distinction: a raw, time-stamped mention vs
+ * an abstracted, generalized axiom. Orthogonal to `MemoryNodeKind` (what
+ * category of thing the node is) — a `preference` node can be either. A
+ * future consolidation pass collapses many episodic nodes that support the
+ * same idea into one semantic node (linked via a PART_OF edge), rather than
+ * letting raw mentions pile up as separate durable facts forever.
+ */
+export type MemoryNodeMemoryType = 'episodic' | 'semantic';
+
 export interface MemoryNode {
   id: string;
   /** Canonical short name used for dedup lookups, e.g. "dark mode preference". */
   label: string;
   kind: MemoryNodeKind;
+  memoryType: MemoryNodeMemoryType;
   description?: string;
   /** Base64-encoded Float32Array, absent until the embedding model has run. */
   embedding?: string;
@@ -42,6 +53,9 @@ export interface MemoryNode {
   valence?: number;
   /** 0-1: how emotionally charged, independent of direction. */
   intensity?: number;
+  /** 0-1: how central this is to the user's core profile, independent of
+   * emotional charge or truth certainty; absent if not scored. */
+  salience?: number;
   /** Scoping container (e.g. per-Pal or per-topic isolation); absent = global. */
   compartmentId?: string;
   provenance: MemoryProvenance;
@@ -70,6 +84,7 @@ export type MemoryNodeInput = Omit<
 
 export interface MemoryNodeFilter {
   kind?: MemoryNodeKind;
+  memoryType?: MemoryNodeMemoryType;
   compartmentId?: string;
   status?: MemoryStatus;
   pinnedOnly?: boolean;

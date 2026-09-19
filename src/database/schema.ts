@@ -1,7 +1,7 @@
 import {appSchema, tableSchema} from '@nozbe/watermelondb';
 
 export default appSchema({
-  version: 10,
+  version: 11,
   tables: [
     tableSchema({
       name: 'chat_sessions',
@@ -172,11 +172,18 @@ export default appSchema({
       columns: [
         {name: 'label', type: 'string', isIndexed: true},
         {name: 'kind', type: 'string', isIndexed: true},
+        // Tulving's episodic/semantic split: a raw, time-stamped mention vs
+        // an abstracted, consolidated axiom. Orthogonal to `kind` (what
+        // category of thing the node is).
+        {name: 'memory_type', type: 'string', isIndexed: true},
         {name: 'description', type: 'string', isOptional: true},
         {name: 'embedding', type: 'string', isOptional: true}, // base64 Float32Array
         {name: 'confidence', type: 'number'},
         {name: 'valence', type: 'number', isOptional: true},
         {name: 'intensity', type: 'number', isOptional: true},
+        // How central this node is to the user's core profile, independent
+        // of emotional charge (`intensity`) or truth certainty (`confidence`).
+        {name: 'salience', type: 'number', isOptional: true},
         {
           name: 'compartment_id',
           type: 'string',

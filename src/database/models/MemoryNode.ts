@@ -4,6 +4,7 @@ import {encodeBase64, decodeBase64} from '../../utils/base64';
 import type {
   MemoryNode as MemoryNodeView,
   MemoryNodeKind,
+  MemoryNodeMemoryType,
 } from '../../types/memoryGraph';
 import type {MemoryProvenance, MemoryStatus} from '../../types/memory';
 
@@ -12,11 +13,13 @@ export default class MemoryNode extends Model {
 
   @field('label') label!: string;
   @field('kind') kind!: MemoryNodeKind;
+  @field('memory_type') memoryType!: MemoryNodeMemoryType;
   @field('description') description?: string;
   @field('embedding') embedding?: string; // base64 Float32Array
   @field('confidence') confidence!: number;
   @field('valence') valence?: number;
   @field('intensity') intensity?: number;
+  @field('salience') salience?: number;
   @field('compartment_id') compartmentId?: string;
   @field('provenance') provenance!: MemoryProvenance;
   @field('source_memory_id') sourceMemoryId?: string;
@@ -49,11 +52,13 @@ export default class MemoryNode extends Model {
       id: this.id,
       label: this.label,
       kind: this.kind,
+      memoryType: this.memoryType,
       description: this.description,
       embedding: this.embedding,
       confidence: this.confidence,
       valence: this.valence,
       intensity: this.intensity,
+      salience: this.salience,
       compartmentId: this.compartmentId,
       provenance: this.provenance,
       sourceMemoryId: this.sourceMemoryId,

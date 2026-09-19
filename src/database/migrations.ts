@@ -246,5 +246,21 @@ export default schemaMigrations({
         }),
       ],
     },
+    // Migration to version 11: Tulving episodic/semantic split and node
+    // salience, so extraction can capture the full psychological texture
+    // of a memory (not just what it says, but what kind of memory it is
+    // and how central it is) from the start.
+    {
+      toVersion: 11,
+      steps: [
+        addColumns({
+          table: 'memory_nodes',
+          columns: [
+            {name: 'memory_type', type: 'string', isIndexed: true},
+            {name: 'salience', type: 'number', isOptional: true},
+          ],
+        }),
+      ],
+    },
   ],
 });

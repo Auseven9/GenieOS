@@ -2,42 +2,88 @@ import {modelStore, chatSessionStore} from '../../store';
 import {resolveDraftModelId} from '../../store/draftResolution';
 import {chatSessionRepository} from '../../repositories/ChatSessionRepository';
 import memoryRepository from '../../repositories/MemoryRepository';
+import memoryGraphRepository from '../../repositories/MemoryGraphRepository';
 import memorySettingsRepository from '../../repositories/MemorySettingsRepository';
 import {convertToChatMessages} from '../../utils/chat';
 import draftCompletionEngine from './DraftCompletionEngine';
 import {
-  extractMemoryCandidates,
+  extractMemoryGraph,
   type ConversationTurn,
-} from './MemoryExtractionPipeline';
+} from './GraphExtractionPipeline';
+import {
+  VALID_NODE_KINDS,
+  VALID_RELATIONS,
+  type GraphNodeCandidate,
+} from './validateMemoryGraphInput';
+import type {MemoryKind} from '../../types/memory';
 
 // Bounds the prompt size for the extraction pass itself — this is separate
 // from, and much smaller than, the digest's own retrieval budget.
 const EXTRACTION_WINDOW_SIZE = 20;
 
-const MEMORY_CANDIDATE_SCHEMA = {
-  type: 'array',
-  items: {
-    type: 'object',
-    properties: {
-      content: {type: 'string'},
-      kind: {
-        type: 'string',
-        enum: [
-          'fact',
-          'preference',
-          'episodic',
-          'procedural',
-          'relationship',
-          'open_thread',
-        ],
+const GRAPH_EXTRACTION_SCHEMA = {
+  type: 'object',
+  properties: {
+    compartment: {type: ['string', 'null']},
+    nodes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          label: {type: 'string'},
+          content: {type: 'string'},
+          kind: {type: 'string', enum: VALID_NODE_KINDS},
+          memory_type: {type: 'string', enum: ['episodic', 'semantic']},
+          confidence: {type: 'number'},
+          valence: {type: 'number'},
+          salience: {type: 'number'},
+          provenance: {
+            type: 'string',
+            enum: ['user_stated', 'model_inferred'],
+          },
+        },
+        required: ['label', 'content', 'memory_type'],
       },
-      tags: {type: 'array', items: {type: 'string'}},
-      provenance: {type: 'string', enum: ['user_stated', 'model_inferred']},
-      confidence: {type: 'number'},
     },
-    required: ['content'],
+    edges: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          source_label: {type: 'string'},
+          target_label: {type: 'string'},
+          relation_type: {type: 'string', enum: VALID_RELATIONS},
+          weight: {type: 'number'},
+          confidence: {type: 'number'},
+        },
+        required: ['source_label', 'target_label', 'relation_type'],
+      },
+    },
   },
+  required: ['nodes'],
 };
+
+/**
+ * Maps a graph node's (memoryType, kind) onto the flat `memories` table's
+ * own kind enum, so every extracted node still lands a `memories` row too
+ * — that's what MemoryDigestBuilder's pinned/searchByText retrieval reads,
+ * and it stays completely unaware the graph exists underneath it.
+ */
+function toMemoryKind(node: GraphNodeCandidate): MemoryKind {
+  if (node.memoryType === 'episodic') {
+    return 'episodic';
+  }
+  switch (node.kind) {
+    case 'preference':
+      return 'preference';
+    case 'open_thread':
+      return 'open_thread';
+    case 'event':
+      return 'episodic';
+    default:
+      return 'fact';
+  }
+}
 
 /**
  * Resolves the file path of the configured draft model — the small model
@@ -75,12 +121,12 @@ async function resolveDraftModelPath(): Promise<string | undefined> {
 
 /**
  * Builds the plain text-in/text-out completion function
- * MemoryExtractionPipeline expects. Schema-constrained via
+ * GraphExtractionPipeline expects. Schema-constrained via
  * response_format.json_schema — llama.rn's own completion() converts this
  * into the native grammar/json_schema constraint for local llama.cpp
  * contexts, and the OpenAI-compatible remote engine forwards it verbatim,
- * so this one shape works for either backend. extractMemoryCandidates
- * still defends against malformed output regardless.
+ * so this one shape works for either backend. extractMemoryGraph still
+ * defends against malformed output regardless.
  *
  * Three-model architecture: prefers the small draft model, loaded as its
  * own independent context so it reasons about what to remember without
@@ -95,9 +141,9 @@ async function createModelCompletionFn(): Promise<
   if (draftModelPath) {
     return (prompt: string) =>
       draftCompletionEngine.complete(draftModelPath, prompt, {
-        jsonSchema: MEMORY_CANDIDATE_SCHEMA,
+        jsonSchema: GRAPH_EXTRACTION_SCHEMA,
         temperature: 0.2,
-        nPredict: 1000,
+        nPredict: 1500,
       });
   }
 
@@ -110,10 +156,10 @@ async function createModelCompletionFn(): Promise<
       messages: [{role: 'user', content: prompt}],
       response_format: {
         type: 'json_schema',
-        json_schema: {strict: true, schema: MEMORY_CANDIDATE_SCHEMA},
+        json_schema: {strict: true, schema: GRAPH_EXTRACTION_SCHEMA},
       },
       temperature: 0.2,
-      n_predict: 1000,
+      n_predict: 1500,
       enable_thinking: false,
     });
     return result.text;
@@ -122,9 +168,11 @@ async function createModelCompletionFn(): Promise<
 
 /**
  * Runs the post-turn extraction pass for a session and persists whatever
- * candidates it finds. Fire-and-forget from the caller's perspective:
- * every failure mode here is swallowed and logged, since memory retrieval/
- * extraction must never be able to disrupt the visible chat.
+ * graph nodes/edges it finds — plus a flat `memories` row per node, so
+ * existing digest retrieval keeps working unchanged. Fire-and-forget from
+ * the caller's perspective: every failure mode here is swallowed and
+ * logged, since memory retrieval/extraction must never be able to disrupt
+ * the visible chat.
  *
  * Guarded on chatSessionStore.isGenerating so this never issues a second,
  * concurrent completion() call against the same engine while the visible
@@ -179,23 +227,79 @@ export async function maybeRunMemoryExtraction(
     }
 
     const complete = await createModelCompletionFn();
-    const candidates = await extractMemoryCandidates(turns, complete);
-    if (candidates.length === 0) {
+    const graph = await extractMemoryGraph(turns, complete);
+    if (graph.nodes.length === 0) {
       return;
     }
 
     const embeddingModelPath =
       await memorySettingsRepository.getEmbeddingModelPath();
-    for (const candidate of candidates) {
-      const input = {...candidate, sourceConversationId: sessionId};
-      if (embeddingModelPath) {
-        await memoryRepository.createMemoryWithEmbedding(
-          embeddingModelPath,
-          input,
-        );
-      } else {
-        await memoryRepository.createMemory(input);
+
+    const compartmentId = graph.compartment
+      ? (await memoryGraphRepository.getOrCreateCompartment(graph.compartment))
+          .id
+      : undefined;
+
+    // Maps each extracted node's label to the id it actually landed at
+    // (which may be an existing semantic node's id, via findOrCreateNode's
+    // dedup) so edges below can resolve their source/target labels.
+    const nodeIdByLabel = new Map<string, string>();
+    for (const node of graph.nodes) {
+      const memoryInput = {
+        kind: toMemoryKind(node),
+        content: node.content,
+        provenance: node.provenance,
+        confidence: node.confidence,
+        valence: node.valence,
+        tags: [],
+        sourceConversationId: sessionId,
+      };
+      const memory = embeddingModelPath
+        ? await memoryRepository.createMemoryWithEmbedding(
+            embeddingModelPath,
+            memoryInput,
+          )
+        : await memoryRepository.createMemory(memoryInput);
+
+      const nodeInput = {
+        label: node.label,
+        kind: node.kind,
+        memoryType: node.memoryType,
+        description: node.content,
+        confidence: node.confidence,
+        valence: node.valence,
+        salience: node.salience,
+        compartmentId,
+        provenance: node.provenance,
+        sourceMemoryId: memory.id,
+      };
+      const createdNode = embeddingModelPath
+        ? await memoryGraphRepository.findOrCreateNode(
+            nodeInput,
+            embeddingModelPath,
+          )
+        : await memoryGraphRepository.findOrCreateNode(nodeInput);
+      nodeIdByLabel.set(node.label.toLowerCase(), createdNode.id);
+    }
+
+    for (const edge of graph.edges) {
+      const sourceNodeId = nodeIdByLabel.get(edge.sourceLabel.toLowerCase());
+      const targetNodeId = nodeIdByLabel.get(edge.targetLabel.toLowerCase());
+      if (!sourceNodeId || !targetNodeId) {
+        continue;
       }
+      await memoryGraphRepository.upsertEdge({
+        sourceNodeId,
+        targetNodeId,
+        relation: edge.relation,
+        weight: edge.weight,
+        confidence: edge.confidence,
+        // Edges are the extraction model's own inferred relations between
+        // two (independently provenance-tracked) nodes, never something
+        // the user stated directly themselves.
+        provenance: 'model_inferred',
+        sourceConversationId: sessionId,
+      });
     }
   } catch (error) {
     console.error('runMemoryExtraction: extraction pass failed:', error);

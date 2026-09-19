@@ -4,6 +4,7 @@ function makeNode(raw: Record<string, any> = {}): MemoryNodeModel {
   const base: Record<string, any> = {
     label: 'cats',
     kind: 'topic',
+    memoryType: 'semantic',
     confidence: 0.8,
     provenance: 'user_stated',
     pinned: false,
@@ -47,6 +48,7 @@ describe('MemoryNode.toView', () => {
       description: 'the user has two cats',
       valence: 0.4,
       intensity: 0.2,
+      salience: 0.6,
       compartmentId: 'compartment-1',
       sourceMemoryId: 'memory-1',
       lastAccessedAt: new Date('2026-01-03T00:00:00Z').getTime(),
@@ -55,7 +57,9 @@ describe('MemoryNode.toView', () => {
     const view = node.toView();
     expect(view.label).toBe('cats');
     expect(view.kind).toBe('topic');
+    expect(view.memoryType).toBe('semantic');
     expect(view.description).toBe('the user has two cats');
+    expect(view.salience).toBe(0.6);
     expect(view.compartmentId).toBe('compartment-1');
     expect(view.sourceMemoryId).toBe('memory-1');
     expect(view.createdAt).toBe('2026-01-01T00:00:00.000Z');

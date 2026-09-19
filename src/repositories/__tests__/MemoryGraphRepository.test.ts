@@ -64,6 +64,7 @@ function makeNodeRecord(overrides: Record<string, any> = {}) {
     id: 'node-1',
     label: 'cats',
     kind: 'topic',
+    memoryType: 'semantic',
     confidence: 0.5,
     compartmentId: undefined,
     provenance: 'user_stated',
@@ -125,6 +126,7 @@ describe('MemoryGraphRepository.findOrCreateNode', () => {
     const result = await memoryGraphRepository.findOrCreateNode({
       label: 'cats',
       kind: 'topic',
+      memoryType: 'semantic',
       provenance: 'user_stated',
     });
 
@@ -143,6 +145,7 @@ describe('MemoryGraphRepository.findOrCreateNode', () => {
     const result = await memoryGraphRepository.findOrCreateNode({
       label: 'dark mode preference',
       kind: 'preference',
+      memoryType: 'semantic',
       provenance: 'user_stated',
     });
 
@@ -161,12 +164,36 @@ describe('MemoryGraphRepository.findOrCreateNode', () => {
     });
 
     const result = await memoryGraphRepository.findOrCreateNode(
-      {label: 'cats', kind: 'topic', provenance: 'user_stated'},
+      {
+        label: 'cats',
+        kind: 'topic',
+        memoryType: 'semantic',
+        provenance: 'user_stated',
+      },
       '/models/bge-small.gguf',
     );
 
     expect(mockEmbed).toHaveBeenCalledWith('/models/bge-small.gguf', 'cats');
     expect(result.embedding).toBe(MemoryNode.encodeEmbedding(vector));
+  });
+
+  it('never dedupes episodic nodes, even against an identical label', async () => {
+    mockNodeCreate.mockImplementation((mutator: (record: any) => void) => {
+      const record = makeNodeRecord({memoryType: 'episodic'});
+      mutator(record);
+      return record;
+    });
+
+    await memoryGraphRepository.findOrCreateNode({
+      label: 'cats',
+      kind: 'topic',
+      memoryType: 'episodic',
+      provenance: 'user_stated',
+    });
+
+    // No lookup query should even run for the episodic path.
+    expect(mockNodeFetch).not.toHaveBeenCalled();
+    expect(mockNodeCreate).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -45,11 +45,13 @@ class MemoryGraphRepository {
         return await this.nodes().create((record: MemoryNode) => {
           record.label = input.label;
           record.kind = input.kind;
+          record.memoryType = input.memoryType;
           record.description = input.description;
           record.embedding = input.embedding;
           record.confidence = input.confidence ?? 0.5;
           record.valence = input.valence;
           record.intensity = input.intensity;
+          record.salience = input.salience;
           record.compartmentId = input.compartmentId;
           record.provenance = input.provenance;
           record.sourceMemoryId = input.sourceMemoryId;
@@ -81,20 +83,33 @@ class MemoryGraphRepository {
   }
 
   /**
-   * Finds an existing active node with the same label (case-insensitive)
-   * and kind within the same compartment, or creates a new one. This is
-   * what keeps the graph a graph rather than a fresh, disconnected node per
-   * extraction pass: "cats" mentioned across ten conversations should
-   * resolve to the same node every time.
+   * Finds an existing active *semantic* node with the same label
+   * (case-insensitive) and kind within the same compartment, or creates a
+   * new one. This is what keeps the graph a graph rather than a fresh,
+   * disconnected node per extraction pass: "cats" mentioned across ten
+   * conversations should resolve to the same semantic node every time.
+   *
+   * Episodic nodes are never deduped this way: each is a distinct,
+   * time-stamped instance by design (Tulving's split — see
+   * MemoryNodeMemoryType), and it's exactly the accumulation of many
+   * episodic nodes that a future consolidation pass collapses into one
+   * semantic node. Deduping them here would silently defeat that.
    */
   async findOrCreateNode(
     input: MemoryNodeInput,
     embeddingModelPath?: string,
   ): Promise<MemoryNodeView> {
+    if (input.memoryType === 'episodic') {
+      return embeddingModelPath
+        ? this.createNodeWithEmbedding(embeddingModelPath, input)
+        : this.createNode(input);
+    }
+
     try {
       const clauses: Clause[] = [
         Q.where('status', 'active'),
         Q.where('kind', input.kind),
+        Q.where('memory_type', 'semantic'),
       ];
       if (input.compartmentId) {
         clauses.push(Q.where('compartment_id', input.compartmentId));
@@ -138,6 +153,9 @@ class MemoryGraphRepository {
       const clauses: Clause[] = [];
       if (filter.kind) {
         clauses.push(Q.where('kind', filter.kind));
+      }
+      if (filter.memoryType) {
+        clauses.push(Q.where('memory_type', filter.memoryType));
       }
       if (filter.compartmentId) {
         clauses.push(Q.where('compartment_id', filter.compartmentId));

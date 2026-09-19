@@ -7,6 +7,9 @@ const mockCompletion = jest.fn();
 const mockConvertToChatMessages = jest.fn();
 const mockGetModelFullPath = jest.fn();
 const mockDraftComplete = jest.fn();
+const mockGetOrCreateCompartment = jest.fn();
+const mockFindOrCreateNode = jest.fn();
+const mockUpsertEdge = jest.fn();
 
 jest.mock('../../../repositories/MemorySettingsRepository', () => ({
   __esModule: true,
@@ -23,6 +26,16 @@ jest.mock('../../../repositories/MemoryRepository', () => ({
     createMemory: (...args: any[]) => mockCreateMemory(...args),
     createMemoryWithEmbedding: (...args: any[]) =>
       mockCreateMemoryWithEmbedding(...args),
+  },
+}));
+
+jest.mock('../../../repositories/MemoryGraphRepository', () => ({
+  __esModule: true,
+  default: {
+    getOrCreateCompartment: (...args: any[]) =>
+      mockGetOrCreateCompartment(...args),
+    findOrCreateNode: (...args: any[]) => mockFindOrCreateNode(...args),
+    upsertEdge: (...args: any[]) => mockUpsertEdge(...args),
   },
 }));
 
@@ -59,6 +72,10 @@ function makeSessionMessage(overrides: Record<string, any> = {}) {
   return {toMessageObject: () => ({id: 'ui-msg', ...overrides})};
 }
 
+function graphResponse(overrides: Record<string, any> = {}) {
+  return JSON.stringify({nodes: [], edges: [], ...overrides});
+}
+
 describe('maybeRunMemoryExtraction', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -68,9 +85,16 @@ describe('maybeRunMemoryExtraction', () => {
     (modelStore as any).models = [];
     mockIsMemoryEnabled.mockResolvedValue(true);
     mockGetEmbeddingModelPath.mockResolvedValue(undefined);
-    mockCompletion.mockResolvedValue({text: '[]'});
-    mockDraftComplete.mockResolvedValue('[]');
+    mockCompletion.mockResolvedValue({text: graphResponse()});
+    mockDraftComplete.mockResolvedValue(graphResponse());
     mockConvertToChatMessages.mockReturnValue([]);
+    mockCreateMemory.mockResolvedValue({id: 'memory-1'});
+    mockCreateMemoryWithEmbedding.mockResolvedValue({id: 'memory-1'});
+    mockFindOrCreateNode.mockImplementation(async (input: any) => ({
+      id: `node-${input.label}`,
+      ...input,
+    }));
+    mockUpsertEdge.mockResolvedValue({id: 'edge-1'});
   });
 
   it('does nothing when memory is disabled', async () => {
@@ -97,7 +121,7 @@ describe('maybeRunMemoryExtraction', () => {
     expect(mockCompletion).not.toHaveBeenCalled();
   });
 
-  it('builds turns from tool/user/assistant roles and persists extracted candidates without an embedding model', async () => {
+  it('persists a memory row and a graph node per extracted node, without an embedding model', async () => {
     mockGetSessionById.mockResolvedValue({
       messages: [makeSessionMessage(), makeSessionMessage()],
     });
@@ -108,7 +132,15 @@ describe('maybeRunMemoryExtraction', () => {
       {role: 'system', content: 'ignored'},
     ]);
     mockCompletion.mockResolvedValue({
-      text: JSON.stringify([{content: 'user is researching cats'}]),
+      text: graphResponse({
+        nodes: [
+          {
+            label: 'cats',
+            content: 'user is researching cats',
+            memory_type: 'semantic',
+          },
+        ],
+      }),
     });
 
     await maybeRunMemoryExtraction('session-1');
@@ -125,15 +157,24 @@ describe('maybeRunMemoryExtraction', () => {
       }),
     );
     expect(mockCreateMemoryWithEmbedding).not.toHaveBeenCalled();
+    expect(mockFindOrCreateNode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        label: 'cats',
+        description: 'user is researching cats',
+        sourceMemoryId: 'memory-1',
+      }),
+    );
   });
 
-  it('uses createMemoryWithEmbedding when an embedding model path is configured', async () => {
+  it('uses createMemoryWithEmbedding and passes the embedding model to findOrCreateNode when configured', async () => {
     mockGetSessionById.mockResolvedValue({messages: [makeSessionMessage()]});
     mockConvertToChatMessages.mockReturnValue([
       {role: 'user', content: 'I like dark mode'},
     ]);
     mockCompletion.mockResolvedValue({
-      text: JSON.stringify([{content: 'likes dark mode'}]),
+      text: graphResponse({
+        nodes: [{label: 'dark mode', content: 'likes dark mode'}],
+      }),
     });
     mockGetEmbeddingModelPath.mockResolvedValue('/models/bge-small.gguf');
 
@@ -144,19 +185,64 @@ describe('maybeRunMemoryExtraction', () => {
       expect.objectContaining({content: 'likes dark mode'}),
     );
     expect(mockCreateMemory).not.toHaveBeenCalled();
+    expect(mockFindOrCreateNode).toHaveBeenCalledWith(
+      expect.objectContaining({label: 'dark mode'}),
+      '/models/bge-small.gguf',
+    );
   });
 
-  it('does not persist anything when extraction finds no candidates', async () => {
+  it('resolves a compartment and creates edges between the ids findOrCreateNode returned', async () => {
+    mockGetSessionById.mockResolvedValue({messages: [makeSessionMessage()]});
+    mockConvertToChatMessages.mockReturnValue([
+      {role: 'user', content: 'I love my cats and prefer dark mode'},
+    ]);
+    mockCompletion.mockResolvedValue({
+      text: graphResponse({
+        compartment: 'family',
+        nodes: [
+          {label: 'cats', content: 'has cats'},
+          {label: 'dark mode', content: 'likes dark mode'},
+        ],
+        edges: [
+          {
+            source_label: 'cats',
+            target_label: 'dark mode',
+            relation_type: 'RELATES_TO',
+          },
+        ],
+      }),
+    });
+    mockGetOrCreateCompartment.mockResolvedValue({id: 'compartment-1'});
+
+    await maybeRunMemoryExtraction('session-1');
+
+    expect(mockGetOrCreateCompartment).toHaveBeenCalledWith('family');
+    expect(mockFindOrCreateNode).toHaveBeenCalledWith(
+      expect.objectContaining({label: 'cats', compartmentId: 'compartment-1'}),
+    );
+    expect(mockUpsertEdge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceNodeId: 'node-cats',
+        targetNodeId: 'node-dark mode',
+        relation: 'RELATES_TO',
+        provenance: 'model_inferred',
+        sourceConversationId: 'session-1',
+      }),
+    );
+  });
+
+  it('does not persist anything when extraction finds no nodes', async () => {
     mockGetSessionById.mockResolvedValue({messages: [makeSessionMessage()]});
     mockConvertToChatMessages.mockReturnValue([
       {role: 'user', content: 'hello'},
     ]);
-    mockCompletion.mockResolvedValue({text: '[]'});
+    mockCompletion.mockResolvedValue({text: graphResponse()});
 
     await maybeRunMemoryExtraction('session-1');
 
     expect(mockCreateMemory).not.toHaveBeenCalled();
-    expect(mockCreateMemoryWithEmbedding).not.toHaveBeenCalled();
+    expect(mockFindOrCreateNode).not.toHaveBeenCalled();
+    expect(mockUpsertEdge).not.toHaveBeenCalled();
   });
 
   it('swallows an error from the completion engine rather than throwing', async () => {
@@ -186,7 +272,9 @@ describe('maybeRunMemoryExtraction', () => {
       {role: 'user', content: 'I like dark mode'},
     ]);
     mockDraftComplete.mockResolvedValue(
-      JSON.stringify([{content: 'likes dark mode'}]),
+      graphResponse({
+        nodes: [{label: 'dark mode', content: 'likes dark mode'}],
+      }),
     );
 
     await maybeRunMemoryExtraction('session-1');
@@ -216,7 +304,7 @@ describe('maybeRunMemoryExtraction', () => {
     mockConvertToChatMessages.mockReturnValue([
       {role: 'user', content: 'hello'},
     ]);
-    mockCompletion.mockResolvedValue({text: '[]'});
+    mockCompletion.mockResolvedValue({text: graphResponse()});
 
     await maybeRunMemoryExtraction('session-1');
 
@@ -231,7 +319,7 @@ describe('maybeRunMemoryExtraction', () => {
     mockConvertToChatMessages.mockReturnValue([
       {role: 'user', content: 'hello'},
     ]);
-    mockCompletion.mockResolvedValue({text: '[]'});
+    mockCompletion.mockResolvedValue({text: graphResponse()});
 
     await maybeRunMemoryExtraction('session-1');
 
