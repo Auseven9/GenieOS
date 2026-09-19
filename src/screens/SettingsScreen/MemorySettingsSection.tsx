@@ -1,8 +1,8 @@
-import React, {useContext} from 'react';
+import React, {useContext, useEffect, useState, useCallback} from 'react';
 import {View, Platform, Alert} from 'react-native';
 
 import {observer} from 'mobx-react-lite';
-import {Text, Card, Button, Switch} from 'react-native-paper';
+import {Text, Card, Button, Switch, SegmentedButtons} from 'react-native-paper';
 import {pick, types} from '@react-native-documents/picker';
 import * as RNFS from '@dr.pogodin/react-native-fs';
 
@@ -12,6 +12,12 @@ import {t} from '../../locales';
 import {memorySettingsStore} from '../../store';
 import {useTheme} from '../../hooks';
 import {createStyles} from './styles';
+import {
+  IDLE_SWEEP_INTERVAL_HOURS_OPTIONS,
+  type IdleSweepIntervalHours,
+} from '../../repositories/MemorySettingsRepository';
+import {forceRunIdleSweep} from '../../services/memory/MemorySweepScheduler';
+import {getWorldviewSummary} from '../../services/memory/MemorySweepPipeline';
 
 // Separate from models/local (full chat models added via ModelsScreen) —
 // an embedding-only GGUF has no chat template/capabilities and does not
@@ -27,12 +33,53 @@ function isUserCancellation(error: unknown): boolean {
   );
 }
 
+// A small, local relative-time phrase rather than utils/formatters.ts's
+// timeAgo(): that helper's output is wired to the "Updated {{time}} ago"
+// model-search sentence, not reusable as a bare fragment here.
+function relativeTimeAgo(
+  epochMs: number,
+  units: Record<string, string>,
+): string {
+  const seconds = Math.floor((Date.now() - epochMs) / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (days > 0) {
+    return `${days} ${days > 1 ? units.days : units.day} ago`;
+  }
+  if (hours > 0) {
+    return `${hours} ${hours > 1 ? units.hours : units.hour} ago`;
+  }
+  if (minutes > 0) {
+    return `${minutes} ${minutes > 1 ? units.minutes : units.minute} ago`;
+  }
+  return units.justNow;
+}
+
 export const MemorySettingsSection = observer(() => {
   const l10n = useContext(L10nContext);
   const theme = useTheme();
   const styles = createStyles(theme);
 
   const fileName = memorySettingsStore.embeddingModelPath?.split('/').pop();
+
+  const [worldviewSummary, setWorldviewSummary] = useState<string | undefined>(
+    undefined,
+  );
+  const [isSweeping, setIsSweeping] = useState(false);
+
+  const refreshWorldviewSummary = useCallback(() => {
+    getWorldviewSummary()
+      .then(setWorldviewSummary)
+      .catch(() => {
+        // getWorldviewSummary already logs; nothing more to do here.
+      });
+  }, []);
+
+  useEffect(() => {
+    refreshWorldviewSummary();
+  }, [refreshWorldviewSummary]);
 
   const handlePickEmbeddingModel = async () => {
     try {
@@ -63,6 +110,37 @@ export const MemorySettingsSection = observer(() => {
       Alert.alert('', l10n.settings.memoryEmbeddingModelCopyError);
     }
   };
+
+  const handleRunSweepNow = async () => {
+    setIsSweeping(true);
+    try {
+      await forceRunIdleSweep();
+      refreshWorldviewSummary();
+    } finally {
+      setIsSweeping(false);
+    }
+  };
+
+  const intervalLabels: Record<IdleSweepIntervalHours, string> = {
+    6: l10n.settings.memoryIdleSweepInterval6h,
+    24: l10n.settings.memoryIdleSweepInterval24h,
+    72: l10n.settings.memoryIdleSweepInterval72h,
+    168: l10n.settings.memoryIdleSweepInterval168h,
+  };
+
+  const lastSweptText = memorySettingsStore.lastSweepAt
+    ? t(l10n.settings.memoryIdleSweepLastRunLabel, {
+        when: relativeTimeAgo(memorySettingsStore.lastSweepAt, {
+          day: l10n.common.day,
+          days: l10n.common.days,
+          hour: l10n.common.hour,
+          hours: l10n.common.hours,
+          minute: l10n.common.minute,
+          minutes: l10n.common.minutes,
+          justNow: l10n.common.justNow,
+        }),
+      })
+    : l10n.settings.memoryIdleSweepLastRunNever;
 
   return (
     <Card elevation={0} style={styles.card}>
@@ -110,6 +188,83 @@ export const MemorySettingsSection = observer(() => {
                 : l10n.settings.memoryEmbeddingModelSelectButton}
             </Button>
           </View>
+
+          {memorySettingsStore.enabled && (
+            <>
+              <Divider style={styles.divider} />
+
+              <View style={styles.switchContainer}>
+                <View style={styles.textContainer}>
+                  <Text variant="titleMedium" style={styles.textLabel}>
+                    {l10n.settings.memoryIdleSweepEnabledLabel}
+                  </Text>
+                  <Text variant="labelSmall" style={styles.textDescription}>
+                    {l10n.settings.memoryIdleSweepEnabledDescription}
+                  </Text>
+                </View>
+                <Switch
+                  testID="memory-idle-sweep-enabled-switch"
+                  value={memorySettingsStore.idleSweepEnabled}
+                  onValueChange={value =>
+                    memorySettingsStore.setIdleSweepEnabled(value)
+                  }
+                />
+              </View>
+
+              {memorySettingsStore.idleSweepEnabled && (
+                <>
+                  <View style={styles.fullRowControl}>
+                    <Text variant="titleMedium" style={styles.textLabel}>
+                      {l10n.settings.memoryIdleSweepIntervalLabel}
+                    </Text>
+                    <Text variant="labelSmall" style={styles.textDescription}>
+                      {l10n.settings.memoryIdleSweepIntervalDescription}
+                    </Text>
+                    <SegmentedButtons
+                      style={styles.segmentedButtons}
+                      value={String(memorySettingsStore.idleSweepIntervalHours)}
+                      onValueChange={value =>
+                        memorySettingsStore.setIdleSweepIntervalHours(
+                          Number(value) as IdleSweepIntervalHours,
+                        )
+                      }
+                      density="medium"
+                      buttons={IDLE_SWEEP_INTERVAL_HOURS_OPTIONS.map(hours => ({
+                        value: String(hours),
+                        label: intervalLabels[hours],
+                      }))}
+                    />
+                  </View>
+
+                  <View style={styles.switchContainer}>
+                    <Text variant="labelSmall" style={styles.textDescription}>
+                      {lastSweptText}
+                    </Text>
+                    <Button
+                      testID="memory-idle-sweep-run-now-button"
+                      mode="outlined"
+                      loading={isSweeping}
+                      disabled={isSweeping}
+                      onPress={handleRunSweepNow}
+                      style={styles.menuButton}>
+                      {l10n.settings.memoryIdleSweepRunNowButton}
+                    </Button>
+                  </View>
+                </>
+              )}
+
+              <Divider style={styles.divider} />
+
+              <View style={styles.settingItemContainer}>
+                <Text variant="titleMedium" style={styles.textLabel}>
+                  {l10n.settings.memoryWorldviewLabel}
+                </Text>
+                <Text variant="labelSmall" style={styles.textDescription}>
+                  {worldviewSummary || l10n.settings.memoryWorldviewEmpty}
+                </Text>
+              </View>
+            </>
+          )}
         </View>
       </Card.Content>
     </Card>

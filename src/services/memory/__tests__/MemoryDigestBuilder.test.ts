@@ -1,11 +1,13 @@
 const mockListMemories = jest.fn();
 const mockSearchByText = jest.fn();
+const mockRecordAccess = jest.fn();
 
 jest.mock('../../../repositories/MemoryRepository', () => ({
   __esModule: true,
   default: {
     listMemories: (...args: any[]) => mockListMemories(...args),
     searchByText: (...args: any[]) => mockSearchByText(...args),
+    recordAccess: (...args: any[]) => mockRecordAccess(...args),
   },
 }));
 
@@ -34,6 +36,7 @@ describe('buildMemoryDigest', () => {
     jest.clearAllMocks();
     mockListMemories.mockResolvedValue([]);
     mockSearchByText.mockResolvedValue([]);
+    mockRecordAccess.mockResolvedValue(undefined);
   });
 
   it('returns null and skips retrieval entirely when no embedding model is configured', async () => {
@@ -209,6 +212,42 @@ describe('buildMemoryDigest', () => {
 
     expect(result).toContain('short one');
     expect(result).not.toContain('x'.repeat(500));
+  });
+
+  it('records access only for memories that actually made it into the digest text', async () => {
+    mockListMemories.mockResolvedValue([
+      makeMemory({id: 'short', content: 'short one', pinned: true}),
+    ]);
+    const shortOnlyDigest = await buildMemoryDigest({
+      embeddingModelPath: '/models/bge-small.gguf',
+      queryText: 'x',
+    });
+    const budget = shortOnlyDigest!.length + 10;
+    mockRecordAccess.mockClear();
+
+    mockListMemories.mockResolvedValue([
+      makeMemory({id: 'short', content: 'short one', pinned: true}),
+      makeMemory({id: 'long', content: 'x'.repeat(500), pinned: true}),
+    ]);
+
+    await buildMemoryDigest({
+      embeddingModelPath: '/models/bge-small.gguf',
+      queryText: 'x',
+      maxChars: budget,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockRecordAccess).toHaveBeenCalledWith('short');
+    expect(mockRecordAccess).not.toHaveBeenCalledWith('long');
+  });
+
+  it('does not record access when nothing is included', async () => {
+    await buildMemoryDigest({
+      embeddingModelPath: '/models/bge-small.gguf',
+      queryText: 'x',
+    });
+    expect(mockRecordAccess).not.toHaveBeenCalled();
   });
 
   it('returns null when retrieval throws, rather than propagating the error', async () => {

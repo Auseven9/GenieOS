@@ -15,6 +15,7 @@ import {
 } from 'react-native-gesture-handler';
 
 import {ttsStore, uiStore} from './src/store';
+import {initMemorySweepScheduler} from './src/services/memory/MemorySweepScheduler';
 import {useTheme} from './src/hooks';
 import {useDeepLinking} from './src/hooks/useDeepLinking';
 import {Theme} from './src/utils/types';
@@ -96,6 +97,12 @@ const App = observer(() => {
     ttsStore.init().catch(() => {
       // init() swallows its own errors; catch to satisfy no-floating-promises.
     });
+  }, []);
+
+  // Registers the idle-memory-sweep foreground check. Idempotent and
+  // swallows its own errors, same contract as ttsStore.init() above.
+  React.useEffect(() => {
+    initMemorySweepScheduler();
   }, []);
 
   return (

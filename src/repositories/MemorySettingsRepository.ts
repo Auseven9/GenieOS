@@ -6,14 +6,27 @@ import {database} from '../database';
 // 'newChatCompletionSettings' in ChatSessionRepository).
 const KEY_EMBEDDING_MODEL_PATH = 'memory.embeddingModelPath';
 const KEY_MEMORY_ENABLED = 'memory.enabled';
+const KEY_IDLE_SWEEP_ENABLED = 'memory.idleSweepEnabled';
+const KEY_IDLE_SWEEP_INTERVAL_HOURS = 'memory.idleSweepIntervalHours';
+const KEY_LAST_SWEEP_AT = 'memory.lastSweepAt';
+
+// Presets rather than a free-typed number: there's no OS-level background
+// scheduler backing this (see MemorySweepScheduler), so the real interval a
+// user gets is "whenever the app is next foregrounded after this much time
+// has passed" — a small, honest set of choices fits that better than a
+// precision the mechanism can't actually deliver.
+export const IDLE_SWEEP_INTERVAL_HOURS_OPTIONS = [6, 24, 72, 168] as const;
+export type IdleSweepIntervalHours =
+  (typeof IDLE_SWEEP_INTERVAL_HOURS_OPTIONS)[number];
+const DEFAULT_IDLE_SWEEP_INTERVAL_HOURS: IdleSweepIntervalHours = 24;
 
 /**
- * Owns the two settings that gate the whole memory feature: which GGUF file
- * is the embedding model, and whether memory is turned on at all. Kept as
- * its own small repository rather than folded into ChatSessionRepository —
- * each repository should own its own domain, and this one is meant to grow
- * a real settings screen around it (embedding model picker, on/off toggle)
- * without touching chat-session code at all.
+ * Owns every setting that gates the memory feature: which GGUF file is the
+ * embedding model, whether memory is turned on at all, and the idle-sweep
+ * schedule (on/off, interval, last-run timestamp). Kept as its own small
+ * repository rather than folded into ChatSessionRepository — each
+ * repository should own its own domain, and this one grows a real settings
+ * screen around it without touching chat-session code at all.
  */
 class MemorySettingsRepository {
   private async getRaw(key: string): Promise<string | undefined> {
@@ -87,6 +100,62 @@ class MemorySettingsRepository {
 
   async setMemoryEnabled(enabled: boolean): Promise<void> {
     await this.setRaw(KEY_MEMORY_ENABLED, JSON.stringify(enabled));
+  }
+
+  /** Off by default, and meaningless while memory itself is off. */
+  async isIdleSweepEnabled(): Promise<boolean> {
+    const raw = await this.getRaw(KEY_IDLE_SWEEP_ENABLED);
+    if (!raw) {
+      return false;
+    }
+    try {
+      return JSON.parse(raw) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  async setIdleSweepEnabled(enabled: boolean): Promise<void> {
+    await this.setRaw(KEY_IDLE_SWEEP_ENABLED, JSON.stringify(enabled));
+  }
+
+  async getIdleSweepIntervalHours(): Promise<IdleSweepIntervalHours> {
+    const raw = await this.getRaw(KEY_IDLE_SWEEP_INTERVAL_HOURS);
+    if (!raw) {
+      return DEFAULT_IDLE_SWEEP_INTERVAL_HOURS;
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      return IDLE_SWEEP_INTERVAL_HOURS_OPTIONS.includes(parsed)
+        ? parsed
+        : DEFAULT_IDLE_SWEEP_INTERVAL_HOURS;
+    } catch {
+      return DEFAULT_IDLE_SWEEP_INTERVAL_HOURS;
+    }
+  }
+
+  async setIdleSweepIntervalHours(
+    hours: IdleSweepIntervalHours,
+  ): Promise<void> {
+    await this.setRaw(KEY_IDLE_SWEEP_INTERVAL_HOURS, JSON.stringify(hours));
+  }
+
+  /** Undefined until the first sweep has ever run. */
+  async getLastSweepAt(): Promise<number | undefined> {
+    const raw = await this.getRaw(KEY_LAST_SWEEP_AT);
+    if (!raw) {
+      return undefined;
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      return typeof parsed === 'number' ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async setLastSweepAt(epochMs: number): Promise<void> {
+    await this.setRaw(KEY_LAST_SWEEP_AT, JSON.stringify(epochMs));
   }
 }
 

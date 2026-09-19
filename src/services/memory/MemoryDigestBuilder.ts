@@ -119,6 +119,7 @@ export async function buildMemoryDigest(
   }
 
   const lines: string[] = [];
+  const included: Memory[] = [];
   let used = DIGEST_HEADER.length;
   for (const memory of combined) {
     const line = `- [${memory.provenance}] ${memory.content}`;
@@ -126,11 +127,21 @@ export async function buildMemoryDigest(
       break;
     }
     lines.push(line);
+    included.push(memory);
     used += line.length + 1;
   }
 
   if (lines.length === 0) {
     return null;
+  }
+
+  // Context reinforcement: a memory that actually surfaces here just got
+  // recalled, so it earns the "re-consolidation spike" computeRetention
+  // measures against — the mechanism decay.ts describes only works if
+  // something actually resets lastAccessedAt on real use. Fire-and-forget:
+  // this must never delay or fail the digest itself.
+  for (const memory of included) {
+    memoryRepository.recordAccess(memory.id).catch(() => {});
   }
 
   return [DIGEST_HEADER, ...lines].join('\n');
