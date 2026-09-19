@@ -38,6 +38,8 @@ import {
   talentRegistry,
 } from '../services/talents';
 import type {ToolDefinition} from '../services/talents/types';
+import memorySettingsRepository from '../repositories/MemorySettingsRepository';
+import {buildMemoryDigest} from '../services/memory/MemoryDigestBuilder';
 import {
   agentStateReducer,
   createTriggerMarkerCache,
@@ -139,6 +141,33 @@ const prepareCompletion = async ({
     now: new Date(),
     maxToolTurns: DEFAULT_MAX_TURNS,
   });
+
+  // Memory retrieval must never be able to break a conversation: both the
+  // settings lookups and buildMemoryDigest itself already swallow their own
+  // errors and resolve to a safe "nothing to add" value (false/undefined/
+  // null), but this still guards against something unexpected escaping
+  // that contract. Currently a no-op in every real session: there is no
+  // settings UI yet to turn memory on or configure an embedding model, so
+  // isMemoryEnabled() always resolves false until that lands.
+  try {
+    const memoryEnabled = await memorySettingsRepository.isMemoryEnabled();
+    if (memoryEnabled) {
+      const embeddingModelPath =
+        await memorySettingsRepository.getEmbeddingModelPath();
+      const memoryDigest = await buildMemoryDigest({
+        embeddingModelPath,
+        queryText: message.text,
+      });
+      if (memoryDigest) {
+        systemPromptFragments.push(memoryDigest);
+      }
+    }
+  } catch (error) {
+    console.error(
+      'useChatSession: memory digest failed, continuing without it:',
+      error,
+    );
+  }
 
   const messages = assembleMessages(systemMessages, systemPromptFragments, [
     ...chatMessages,
