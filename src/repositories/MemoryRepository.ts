@@ -2,6 +2,7 @@ import {Q} from '@nozbe/watermelondb';
 import type {Clause} from '@nozbe/watermelondb/QueryDescription';
 import {database} from '../database';
 import Memory from '../database/models/Memory';
+import embeddingEngine from '../services/memory/EmbeddingEngine';
 import type {
   Memory as MemoryView,
   MemoryFilter,
@@ -182,6 +183,40 @@ class MemoryRepository {
     } catch (error) {
       console.error('MemoryRepository: error hard-deleting memory:', error);
     }
+  }
+
+  /**
+   * Embeds `input.content` via the given embedding model and stores the
+   * result alongside the memory in one step — the path the extraction
+   * pipeline uses so a new memory is searchable immediately rather than
+   * landing without a vector until some later backfill pass.
+   */
+  async createMemoryWithEmbedding(
+    embeddingModelPath: string,
+    input: MemoryInput,
+  ): Promise<MemoryView> {
+    const vector = await embeddingEngine.embed(
+      embeddingModelPath,
+      input.content,
+    );
+    return this.createMemory({
+      ...input,
+      embedding: Memory.encodeEmbedding(vector),
+    });
+  }
+
+  /**
+   * Embeds free-text (e.g. the current conversation's gist) and ranks
+   * stored memories against it — the read-side counterpart of
+   * `createMemoryWithEmbedding`.
+   */
+  async searchByText(
+    embeddingModelPath: string,
+    queryText: string,
+    limit: number = 10,
+  ): Promise<Array<MemoryView & {similarity: number}>> {
+    const vector = await embeddingEngine.embed(embeddingModelPath, queryText);
+    return this.searchByEmbedding(vector, limit);
   }
 
   /**

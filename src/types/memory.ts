@@ -59,6 +59,8 @@ export type MemoryInput = Omit<
   | 'lastAccessedAt'
   | 'createdAt'
   | 'updatedAt'
+  | 'confidence'
+  | 'pinned'
 > &
   Partial<Pick<Memory, 'confidence' | 'pinned'>>;
 
