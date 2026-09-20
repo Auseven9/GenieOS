@@ -223,7 +223,19 @@ dependencies {
     // Lifecycle for DownloadModule
     implementation "androidx.lifecycle:lifecycle-livedata-ktx:2.9.4"
     // Coroutines for DownloadModule (wait)
-    implementation "androidx.concurrent:concurrent-futures-ktx:1.3.0" 
+    implementation "androidx.concurrent:concurrent-futures-ktx:1.3.0"
+    // concurrent-futures-ktx's ListenableFuture<T>.await() resolves against
+    // com.google.guava:guava's real ListenableFuture class. Without an
+    // explicit real Guava dependency here, some other library in this large
+    // dependency graph pulls in Guava's "empty-to-avoid-conflict-with-guava"
+    // phantom stub artifact instead (Guava's own trick for coexisting with
+    // the standalone listenablefuture artifact) — its version number is
+    // deliberately huge so it always wins Gradle's version conflict
+    // resolution, silently replacing the real class with an unusable stub
+    // and producing "Cannot access class 'ListenableFuture'" at compile
+    // time in DownloadModule.kt. Declaring the real artifact directly, plus
+    // forcing it below, keeps that stub from winning.
+    implementation "com.google.guava:guava:33.3.1-android"
 
     // Core library for AndroidX Jetpack - Needed for WindowCompat (we use for edge-to-edge)
     implementation "androidx.core:core-ktx:1.17.0"
@@ -236,6 +248,19 @@ dependencies {
 
     // OkHttp for DownloadModule (network requests)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+}
+
+// Forces the real Guava artifact everywhere in this module's compile/runtime
+// classpath — see the comment on the guava dependency above. Without this,
+// Gradle's default "highest version wins" conflict resolution can still let
+// some other transitive dependency's request for Guava's phantom
+// "9999.0-empty-to-avoid-conflict-with-guava" stub win over the real
+// version declared just above, since that stub's version number is
+// deliberately huge specifically to always win such conflicts.
+configurations.all {
+    resolutionStrategy {
+        force "com.google.guava:guava:33.3.1-android"
+    }
 }
 
 project.ext.vectoricons = [
